@@ -1,0 +1,76 @@
+# Azure App Services Deployment Pipeline
+# This file configures the deployment pipeline for both frontend and backend
+
+name: Deploy Campus Booking System to Azure
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AZURE_WEBAPP_NAME_FRONTEND: campus-booking-frontend
+  AZURE_WEBAPP_NAME_BACKEND: campus-booking-backend
+  NODE_VERSION: '18.x'
+
+jobs:
+  build-and-deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 'Checkout GitHub Action'
+      uses: actions/checkout@v2
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Build React app
+      run: |
+        cd frontend
+        npm run build
+
+    - name: Deploy to Azure Web App
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME_FRONTEND }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_FRONTEND }}
+        package: ./frontend/build
+
+  build-and-deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 'Checkout GitHub Action'
+      uses: actions/checkout@v2
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd backend
+        npm ci
+
+    - name: Build TypeScript
+      run: |
+        cd backend
+        npm run build
+
+    - name: Deploy to Azure Web App
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME_BACKEND }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_BACKEND }}
+        package: ./backend

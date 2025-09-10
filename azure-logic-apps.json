@@ -1,0 +1,112 @@
+{
+  "definition": {
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "actions": {
+      "Send_booking_confirmation_email": {
+        "type": "ApiConnection",
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['office365']['connectionId']"
+            }
+          },
+          "method": "post",
+          "path": "/v2/Mail",
+          "body": {
+            "To": "@triggerBody()?['inchargeEmail']",
+            "Subject": "Booking Confirmation - @{triggerBody()?['eventName']}",
+            "Body": "<h2>Booking Confirmation</h2><p>Your booking has been confirmed:</p><ul><li><strong>Event:</strong> @{triggerBody()?['eventName']}</li><li><strong>Resource:</strong> @{triggerBody()?['resourceName']}</li><li><strong>Date:</strong> @{formatDateTime(triggerBody()?['startDateTime'], 'yyyy-MM-dd HH:mm')}</li><li><strong>Duration:</strong> @{triggerBody()?['startDateTime']} - @{triggerBody()?['endDateTime']}</li></ul><p>Thank you for using the Campus Resource Booking System.</p>",
+            "Importance": "Normal"
+          }
+        }
+      },
+      "Send_booking_reminder_email": {
+        "type": "ApiConnection",
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['office365']['connectionId']"
+            }
+          },
+          "method": "post",
+          "path": "/v2/Mail",
+          "body": {
+            "To": "@triggerBody()?['inchargeEmail']",
+            "Subject": "Booking Reminder - @{triggerBody()?['eventName']}",
+            "Body": "<h2>Booking Reminder</h2><p>This is a reminder for your upcoming booking:</p><ul><li><strong>Event:</strong> @{triggerBody()?['eventName']}</li><li><strong>Resource:</strong> @{triggerBody()?['resourceName']}</li><li><strong>Date:</strong> @{formatDateTime(triggerBody()?['startDateTime'], 'yyyy-MM-dd HH:mm')}</li></ul><p>Please arrive on time for your booking.</p>",
+            "Importance": "Normal"
+          }
+        }
+      }
+    },
+    "contentVersion": "1.0.0.0",
+    "outputs": {},
+    "parameters": {
+      "$connections": {
+        "defaultValue": {},
+        "type": "Object"
+      }
+    },
+    "triggers": {
+      "When_a_booking_is_created": {
+        "type": "ApiConnectionWebhook",
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['http']['connectionId']"
+            }
+          },
+          "method": "post",
+          "path": "/bookings/created",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "eventName": {
+                "type": "string"
+              },
+              "resourceName": {
+                "type": "string"
+              },
+              "startDateTime": {
+                "type": "string"
+              },
+              "endDateTime": {
+                "type": "string"
+              },
+              "inchargeEmail": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "Daily_booking_reminders": {
+        "type": "Recurrence",
+        "recurrence": {
+          "frequency": "Day",
+          "interval": 1,
+          "startTime": "2024-01-01T09:00:00Z"
+        }
+      }
+    }
+  },
+  "parameters": {
+    "$connections": {
+      "value": {
+        "office365": {
+          "connectionId": "/subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.Web/connections/office365",
+          "connectionName": "office365",
+          "id": "/subscriptions/{subscription-id}/providers/Microsoft.Web/locations/{location}/managedApis/office365"
+        },
+        "http": {
+          "connectionId": "/subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.Web/connections/http",
+          "connectionName": "http",
+          "id": "/subscriptions/{subscription-id}/providers/Microsoft.Web/locations/{location}/managedApis/http"
+        }
+      }
+    }
+  }
+}
