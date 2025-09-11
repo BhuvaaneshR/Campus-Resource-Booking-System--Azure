@@ -114,19 +114,19 @@ PORT=5001
 NODE_ENV=development
 
 # Microsoft Entra ID Configuration
-AZURE_CLIENT_ID=your-application-client-id
-AZURE_CLIENT_SECRET=your-client-secret-value
-AZURE_TENANT_ID=your-tenant-id
+AZURE_CLIENT_ID=52b48269-dad8-44b2-af5f-f7bc01b101c5
+AZURE_CLIENT_SECRET=9in8Q~n2wY4-FGICkPcP45A73knGp6Sk8axjaabt
+AZURE_TENANT_ID=5e530511-5b66-4b8b-833f-2ecfbc2730b6
 AZURE_REDIRECT_URI=http://localhost:3000
 
 # JWT Configuration
 JWT_SECRET=your-super-secure-jwt-secret-key-here
 
 # Database Configuration (SQL Server)
-DB_SERVER=your-database-server
+DB_SERVER=campusbookingserver.database.windows.net
 DB_DATABASE=CampusBookingSystem
-DB_USERNAME=your-database-username
-DB_PASSWORD=your-database-password
+DB_USERNAME=campusbookingserver
+DB_PASSWORD=Campusresourcebooking@220701045
 DB_ENCRYPT=true
 
 # Azure Services Configuration
@@ -142,8 +142,8 @@ Create `.env` file in the `frontend` directory:
 
 ```env
 # Microsoft Entra ID Configuration
-REACT_APP_AZURE_CLIENT_ID=your-application-client-id
-REACT_APP_AZURE_TENANT_ID=your-tenant-id
+REACT_APP_AZURE_CLIENT_ID=69a46e79-eb1a-4b10-950c-f80c15c47115
+REACT_APP_AZURE_TENANT_ID=5e530511-5b66-4b8b-833f-2ecfbc2730b6
 REACT_APP_REDIRECT_URI=http://localhost:3000
 
 # Backend API Configuration

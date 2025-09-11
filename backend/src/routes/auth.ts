@@ -64,7 +64,7 @@ router.post('/login', async (req: Request, res: Response) => {
     
     let userRoles: string[] = [];
     if (appRolesResponse.ok) {
-      const rolesData = await appRolesResponse.json();
+      const rolesData = await appRolesResponse.json() as { value: any[] };
       userRoles = rolesData.value.map((assignment: any) => {
         // Map role IDs to role names (you'll need to configure these in Entra ID)
         const roleId = assignment.appRoleId;
