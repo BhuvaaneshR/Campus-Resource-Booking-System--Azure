@@ -50,7 +50,7 @@ jobs:
         name: node-app
       
     - name: Login to Azure
-      uses: azure/login@v2
+      uses: azure/login@v5
       with:
         client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_4D8D5D82973349C2B541FB375B07312B }}
         tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8B513D9E400D4F269621D162427704ED }}
@@ -58,8 +58,9 @@ jobs:
 
     - name: 'Deploy to Azure Web App'
       id: deploy-to-webapp
-      uses: azure/webapps-deploy@v3
+      uses: azure/webapps-deploy@v5
       with:
         app-name: 'educonnect'
         slot-name: 'Production'
         package: . # Correct path, as the artifact now contains the app root
+
