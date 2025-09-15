@@ -2,9 +2,9 @@
 -- SQL Server Database
 
 -- Create database (run this separately if needed)
--- CREATE DATABASE campus_booking_db;
+-- CREATE DATABASE campusbookingdb;
 
-USE campus_booking_db;
+USE campusbookingdb;
 
 -- Users table for authentication and role management
 CREATE TABLE Users (

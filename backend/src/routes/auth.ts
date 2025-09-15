@@ -34,6 +34,33 @@ const ROLE_MAPPINGS = {
 // Login endpoint for Microsoft Entra ID SSO with RBAC
 router.post('/login', async (req: Request, res: Response) => {
   try {
+    // Check if authentication is disabled
+    if (process.env.AUTH_MODE === 'disabled') {
+      // Return mock user for bypass mode
+      const mockUser = {
+        id: 'bypass-user',
+        email: 'admin@rajalakshmi.edu.in',
+        name: 'System Admin',
+        role: 'Portal Admin'
+      };
+
+      // Generate JWT token for consistency
+      const jwtPayload = {
+        id: mockUser.id,
+        email: mockUser.email,
+        name: mockUser.name,
+        role: mockUser.role
+      };
+      const secret = process.env.JWT_SECRET!;
+      const jwtToken = jwt.sign(jwtPayload, secret, { expiresIn: '24h' });
+
+      return res.json({
+        success: true,
+        token: jwtToken,
+        user: mockUser
+      });
+    }
+
     const { accessToken } = req.body;
 
     if (!accessToken) {
@@ -177,6 +204,22 @@ router.post('/login', async (req: Request, res: Response) => {
 // Verify token endpoint
 router.get('/verify', async (req: Request, res: Response) => {
   try {
+    // Check if authentication is disabled
+    if (process.env.AUTH_MODE === 'disabled') {
+      // Return mock user for bypass mode
+      const mockUser = {
+        id: 'bypass-user',
+        email: 'admin@rajalakshmi.edu.in',
+        name: 'System Admin',
+        role: 'Portal Admin'
+      };
+
+      return res.json({
+        valid: true,
+        user: mockUser
+      });
+    }
+
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 

@@ -59,10 +59,9 @@ const Dashboard: React.FC = () => {
   const fetchBookings = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/bookings');
+      const response = await api.get('/campus/bookings');
       setBookings(response.data.data);
     } catch (error) {
-      setError('Failed to fetch bookings');
       console.error('Error fetching bookings:', error);
     } finally {
       setLoading(false);

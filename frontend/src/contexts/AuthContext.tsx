@@ -40,6 +40,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        // Check if authentication is disabled
+        if (process.env.REACT_APP_AUTH_MODE === 'disabled') {
+          // Set a mock user for bypass mode
+          const mockUser: User = {
+            id: 'bypass-user',
+            email: 'admin@rajalakshmi.edu.in',
+            name: 'System Admin',
+            role: 'Portal Admin'
+          };
+          setUser(mockUser);
+          setLoading(false);
+          return;
+        }
+
         // Check for existing MSAL account
         if (accounts.length > 0) {
           const account = accounts[0];
@@ -97,6 +111,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const login = async () => {
     try {
       setLoading(true);
+      
+      // Check if authentication is disabled
+      if (process.env.REACT_APP_AUTH_MODE === 'disabled') {
+        // Set a mock user for bypass mode
+        const mockUser: User = {
+          id: 'bypass-user',
+          email: 'admin@rajalakshmi.edu.in',
+          name: 'System Admin',
+          role: 'Portal Admin'
+        };
+        setUser(mockUser);
+        setLoading(false);
+        return;
+      }
+
       const response = await instance.loginPopup(loginRequest);
       
       if (response.account) {
@@ -136,6 +165,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
+      // Check if authentication is disabled
+      if (process.env.REACT_APP_AUTH_MODE === 'disabled') {
+        setUser(null);
+        return;
+      }
+
       await instance.logoutPopup();
       setUser(null);
       localStorage.removeItem('token');

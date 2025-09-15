@@ -5,14 +5,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.closeDatabase = exports.getPool = exports.connectToDatabase = void 0;
 const mssql_1 = __importDefault(require("mssql"));
+const dotenv_1 = __importDefault(require("dotenv"));
+// Ensure environment variables are loaded
+dotenv_1.default.config();
 const config = {
     server: process.env.DB_SERVER || 'localhost',
-    database: process.env.DB_NAME || 'campus_booking_db',
-    user: process.env.DB_USER || 'sa',
+    database: process.env.DB_DATABASE || 'campus_booking_db',
+    user: process.env.DB_USERNAME || 'sa',
     password: process.env.DB_PASSWORD || 'password',
     options: {
-        encrypt: process.env.DB_ENCRYPT === 'true',
-        trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === 'true',
+        encrypt: process.env.DB_ENCRYPT === 'true', // Use encryption for Azure SQL
+        trustServerCertificate: false, // Azure SQL requires this to be false
+        enableArithAbort: true, // Required for Azure SQL
     },
     pool: {
         max: 10,

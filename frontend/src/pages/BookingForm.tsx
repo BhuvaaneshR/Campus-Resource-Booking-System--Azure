@@ -66,7 +66,7 @@ const BookingForm: React.FC = () => {
 
   const fetchResources = async () => {
     try {
-      const response = await api.get('/resources');
+      const response = await api.get('/campus/resources');
       setResources(response.data.data);
     } catch (error) {
       setError('Failed to fetch resources');
@@ -175,7 +175,18 @@ const BookingForm: React.FC = () => {
         await api.put(`/bookings/${id}`, bookingData);
         setSuccess('Booking updated successfully!');
       } else {
-        await api.post('/bookings', bookingData);
+        // Map form data to your database schema
+        const campusBookingData = {
+          resourceId: formData.resourceId,
+          requestedByName: formData.inchargeName,
+          requestedByEmail: formData.inchargeEmail,
+          eventTitle: formData.eventName,
+          startTime: formData.startDateTime?.toISOString(),
+          endTime: formData.endDateTime?.toISOString(),
+          bookingCategory: formData.activityType || 'General',
+          isPriority: false
+        };
+        await api.post('/campus/bookings', campusBookingData);
         setSuccess('Booking created successfully!');
       }
 

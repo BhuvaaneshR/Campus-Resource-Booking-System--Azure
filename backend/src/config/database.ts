@@ -1,13 +1,18 @@
 import sql from 'mssql';
+import dotenv from 'dotenv';
+
+// Ensure environment variables are loaded
+dotenv.config();
 
 const config: sql.config = {
   server: process.env.DB_SERVER || 'localhost',
-  database: process.env.DB_NAME || 'campus_booking_db',
-  user: process.env.DB_USER || 'sa',
+  database: process.env.DB_DATABASE || 'campus_booking_db',
+  user: process.env.DB_USERNAME || 'sa',
   password: process.env.DB_PASSWORD || 'password',
   options: {
-    encrypt: process.env.DB_ENCRYPT === 'true',
-    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === 'true',
+    encrypt: process.env.DB_ENCRYPT === 'true', // Use encryption for Azure SQL
+    trustServerCertificate: false, // Azure SQL requires this to be false
+    enableArithAbort: true, // Required for Azure SQL
   },
   pool: {
     max: 10,

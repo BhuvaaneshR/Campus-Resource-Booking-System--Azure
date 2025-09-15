@@ -14,19 +14,51 @@ exports.authRoutes = router;
 // Microsoft Entra ID configuration
 const msalConfig = {
     auth: {
-        clientId: process.env.AZURE_CLIENT_ID || 'dummy-client-id',
-        clientSecret: process.env.AZURE_CLIENT_SECRET || 'dummy-secret',
-        authority: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID || 'dummy-tenant'}`
+        clientId: process.env.AZURE_CLIENT_ID || '',
+        clientSecret: process.env.AZURE_CLIENT_SECRET || '',
+        authority: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID || 'common'}`
     }
 };
-// Only create MSAL instance if credentials are provided
+// Create MSAL instance
 let cca = null;
 if (process.env.AZURE_CLIENT_ID && process.env.AZURE_CLIENT_SECRET && process.env.AZURE_TENANT_ID) {
     cca = new msal_node_1.ConfidentialClientApplication(msalConfig);
 }
-// Login endpoint for Microsoft Entra ID SSO
+// Allowed email domains
+const ALLOWED_DOMAINS = (process.env.ALLOWED_DOMAINS || 'rajalakshmi.edu.in').split(',');
+// Role mappings from Entra ID to application roles
+const ROLE_MAPPINGS = {
+    'PortalAdmin': 'Portal Admin',
+    'Faculty': 'Faculty',
+    'StudentCoordinator': 'Student Coordinator'
+};
+// Login endpoint for Microsoft Entra ID SSO with RBAC
 router.post('/login', async (req, res) => {
     try {
+        // Check if authentication is disabled
+        if (process.env.AUTH_MODE === 'disabled') {
+            // Return mock user for bypass mode
+            const mockUser = {
+                id: 'bypass-user',
+                email: 'admin@rajalakshmi.edu.in',
+                name: 'System Admin',
+                role: 'Portal Admin'
+            };
+            // Generate JWT token for consistency
+            const jwtPayload = {
+                id: mockUser.id,
+                email: mockUser.email,
+                name: mockUser.name,
+                role: mockUser.role
+            };
+            const secret = process.env.JWT_SECRET;
+            const jwtToken = jsonwebtoken_1.default.sign(jwtPayload, secret, { expiresIn: '24h' });
+            return res.json({
+                success: true,
+                token: jwtToken,
+                user: mockUser
+            });
+        }
         const { accessToken } = req.body;
         if (!accessToken) {
             return res.status(400).json({ error: 'Access token is required' });
@@ -42,30 +74,99 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid access token' });
         }
         const userInfo = await response.json();
-        // Check if user has admin role in database
+        // Get user's app roles from Microsoft Graph API
+        const appRolesResponse = await fetch('https://graph.microsoft.com/v1.0/me/appRoleAssignments', {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        let userRoles = [];
+        if (appRolesResponse.ok) {
+            const rolesData = await appRolesResponse.json();
+            userRoles = rolesData.value.map((assignment) => {
+                // Map role IDs to role names (you'll need to configure these in Entra ID)
+                const roleId = assignment.appRoleId;
+                return Object.keys(ROLE_MAPPINGS).find(key => 
+                // This is a placeholder - you'll need to map actual role IDs from your Entra ID app
+                roleId === key) || 'Student Coordinator'; // Default role
+            });
+        }
+        // Validate email domain
+        const userEmail = userInfo.mail || userInfo.userPrincipalName;
+        const emailDomain = userEmail?.split('@')[1]?.toLowerCase();
+        if (!userEmail || !ALLOWED_DOMAINS.includes(emailDomain)) {
+            return res.status(403).json({
+                error: `Access denied. Only ${ALLOWED_DOMAINS.join(', ')} email addresses are allowed.`
+            });
+        }
+        // Determine user role (prioritize Entra ID roles, fallback to database)
+        let userRole = 'Student Coordinator'; // Default role
+        if (userRoles.length > 0) {
+            // Use highest priority role from Entra ID
+            if (userRoles.includes('PortalAdmin')) {
+                userRole = 'Portal Admin';
+            }
+            else if (userRoles.includes('Faculty')) {
+                userRole = 'Faculty';
+            }
+            else {
+                userRole = 'Student Coordinator';
+            }
+        }
+        else {
+            // Fallback: Check database for existing user role
+            const pool = await (0, database_1.connectToDatabase)();
+            const result = await pool.request()
+                .input('email', mssql_1.default.NVarChar, userEmail)
+                .query(`
+          SELECT u.id, u.email, u.name, u.role, u.isActive
+          FROM Users u
+          WHERE u.email = @email AND u.isActive = 1
+        `);
+            if (result.recordset.length > 0) {
+                userRole = result.recordset[0].role;
+            }
+        }
+        // Create or update user in database
         const pool = await (0, database_1.connectToDatabase)();
-        const result = await pool.request()
-            .input('email', mssql_1.default.NVarChar, userInfo.mail || userInfo.userPrincipalName)
+        await pool.request()
+            .input('email', mssql_1.default.NVarChar, userEmail)
+            .input('name', mssql_1.default.NVarChar, userInfo.displayName || userInfo.name)
+            .input('role', mssql_1.default.NVarChar, userRole)
+            .query(`
+        MERGE Users AS target
+        USING (VALUES (@email, @name, @role, 1)) AS source (email, name, role, isActive)
+        ON target.email = source.email
+        WHEN MATCHED THEN
+          UPDATE SET name = source.name, role = source.role, isActive = source.isActive
+        WHEN NOT MATCHED THEN
+          INSERT (email, name, role, isActive) VALUES (source.email, source.name, source.role, source.isActive);
+      `);
+        // Get the updated user record
+        const userResult = await pool.request()
+            .input('email', mssql_1.default.NVarChar, userEmail)
             .query(`
         SELECT u.id, u.email, u.name, u.role, u.isActive
         FROM Users u
-        WHERE u.email = @email AND u.role = 'Portal Admin' AND u.isActive = 1
+        WHERE u.email = @email AND u.isActive = 1
       `);
-        if (result.recordset.length === 0) {
+        if (userResult.recordset.length === 0) {
             return res.status(403).json({
-                error: 'Access denied. User is not authorized as Portal Admin.'
+                error: 'Access denied. Unable to create or access user record.'
             });
         }
-        const user = result.recordset[0];
+        const user = userResult.recordset[0];
         // Generate JWT token
-        const payload = {
+        const jwtPayload = {
             id: user.id,
             email: user.email,
             name: user.name,
-            role: user.role
+            role: user.role,
+            oid: userInfo.id // Entra ID object identifier
         };
         const secret = process.env.JWT_SECRET;
-        const jwtToken = jsonwebtoken_1.default.sign(payload, secret, { expiresIn: '24h' });
+        const jwtToken = jsonwebtoken_1.default.sign(jwtPayload, secret, { expiresIn: '24h' });
         res.json({
             success: true,
             token: jwtToken,
@@ -85,6 +186,20 @@ router.post('/login', async (req, res) => {
 // Verify token endpoint
 router.get('/verify', async (req, res) => {
     try {
+        // Check if authentication is disabled
+        if (process.env.AUTH_MODE === 'disabled') {
+            // Return mock user for bypass mode
+            const mockUser = {
+                id: 'bypass-user',
+                email: 'admin@rajalakshmi.edu.in',
+                name: 'System Admin',
+                role: 'Portal Admin'
+            };
+            return res.json({
+                valid: true,
+                user: mockUser
+            });
+        }
         const authHeader = req.headers['authorization'];
         const token = authHeader && authHeader.split(' ')[1];
         if (!token) {

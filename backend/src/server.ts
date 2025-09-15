@@ -6,8 +6,11 @@ import dotenv from 'dotenv';
 import { authRoutes } from './routes/auth';
 import { bookingRoutes } from './routes/bookings';
 import { resourceRoutes } from './routes/resources';
+import { databaseRoutes } from './routes/database';
+import { campusDbRoutes } from './routes/campus-db';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticateToken } from './middleware/auth';
+import { connectToDatabase, getPool } from './config/database';
 
 // Load environment variables
 dotenv.config();
@@ -32,11 +35,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+  const pool = getPool();
+  const dbStatus = pool && pool.connected ? 'Connected' : 'Disconnected';
+  
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV 
+    environment: process.env.NODE_ENV,
+    database: dbStatus
   });
 });
 
@@ -44,6 +51,8 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/bookings', authenticateToken, bookingRoutes);
 app.use('/api/resources', authenticateToken, resourceRoutes);
+app.use('/api/db', databaseRoutes); // Direct database access routes
+app.use('/api/campus', campusDbRoutes); // Campus database routes for existing schema
 
 // Error handling middleware
 app.use(errorHandler);
@@ -56,11 +65,27 @@ app.use('*', (req, res) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-});
+// Initialize database connection and start server
+async function startServer() {
+  try {
+    // Connect to database
+    await connectToDatabase();
+    console.log('🔗 Database connected successfully');
+    
+    // Start server
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+      console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+      console.log('✅ Application started successfully!');
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Start the application
+startServer();
 
 export default app;

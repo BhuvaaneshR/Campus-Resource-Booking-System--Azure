@@ -11,8 +11,11 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const auth_1 = require("./routes/auth");
 const bookings_1 = require("./routes/bookings");
 const resources_1 = require("./routes/resources");
+const database_1 = require("./routes/database");
+const campus_db_1 = require("./routes/campus-db");
 const errorHandler_1 = require("./middleware/errorHandler");
 const auth_2 = require("./middleware/auth");
+const database_2 = require("./config/database");
 // Load environment variables
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -31,17 +34,22 @@ app.use((0, morgan_1.default)('combined'));
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true }));
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+    const pool = (0, database_2.getPool)();
+    const dbStatus = pool && pool.connected ? 'Connected' : 'Disconnected';
     res.status(200).json({
         status: 'OK',
         timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV
+        environment: process.env.NODE_ENV,
+        database: dbStatus
     });
 });
 // API Routes
 app.use('/api/auth', auth_1.authRoutes);
 app.use('/api/bookings', auth_2.authenticateToken, bookings_1.bookingRoutes);
 app.use('/api/resources', auth_2.authenticateToken, resources_1.resourceRoutes);
+app.use('/api/db', database_1.databaseRoutes); // Direct database access routes
+app.use('/api/campus', campus_db_1.campusDbRoutes); // Campus database routes for existing schema
 // Error handling middleware
 app.use(errorHandler_1.errorHandler);
 // 404 handler
@@ -51,11 +59,26 @@ app.use('*', (req, res) => {
         path: req.originalUrl
     });
 });
-// Start server
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV}`);
-    console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-});
+// Initialize database connection and start server
+async function startServer() {
+    try {
+        // Connect to database
+        await (0, database_2.connectToDatabase)();
+        console.log('🔗 Database connected successfully');
+        // Start server
+        app.listen(PORT, () => {
+            console.log(`🚀 Server running on port ${PORT}`);
+            console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+            console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+            console.log('✅ Application started successfully!');
+        });
+    }
+    catch (error) {
+        console.error('❌ Failed to start server:', error);
+        process.exit(1);
+    }
+}
+// Start the application
+startServer();
 exports.default = app;
 //# sourceMappingURL=server.js.map

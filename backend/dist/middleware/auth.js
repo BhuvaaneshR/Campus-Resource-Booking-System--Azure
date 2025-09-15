@@ -7,6 +7,17 @@ exports.requireRole = exports.authenticateToken = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const authenticateToken = async (req, res, next) => {
     try {
+        // Check if authentication is disabled
+        if (process.env.AUTH_MODE === 'disabled') {
+            // Create a mock user for bypass mode
+            req.user = {
+                id: 'bypass-user',
+                email: 'admin@rajalakshmi.edu.in',
+                name: 'System Admin',
+                role: 'Portal Admin'
+            };
+            return next();
+        }
         const authHeader = req.headers['authorization'];
         const token = authHeader && authHeader.split(' ')[1];
         if (!token) {
