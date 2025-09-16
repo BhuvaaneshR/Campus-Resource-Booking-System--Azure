@@ -255,6 +255,3 @@ This project is part of a Cloud Computing course and is for educational purposes
 4. Push to the branch
 5. Create a Pull Request
 
-## 📞 Support
-
-For support and questions, please contact the development team or create an issue in the repository.
