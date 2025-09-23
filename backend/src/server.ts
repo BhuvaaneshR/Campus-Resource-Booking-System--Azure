@@ -16,7 +16,7 @@ import { connectToDatabase, getPool } from './config/database';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || process.env.WEBSITES_PORT || 5001;
+const PORT = parseInt(process.env.PORT || process.env.WEBSITES_PORT || '5001', 10);
 
 // Security middleware
 app.use(helmet());
@@ -73,7 +73,7 @@ async function startServer() {
     console.log('🔗 Database connected successfully');
     
     // Start server
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Environment: ${process.env.NODE_ENV}`);
       console.log(`🔗 Health check: http://localhost:${PORT}/health`);

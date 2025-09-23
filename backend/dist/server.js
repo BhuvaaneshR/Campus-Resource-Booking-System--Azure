@@ -19,7 +19,7 @@ const database_2 = require("./config/database");
 // Load environment variables
 dotenv_1.default.config();
 const app = (0, express_1.default)();
-const PORT = process.env.PORT || 5001;
+const PORT = parseInt(process.env.PORT || process.env.WEBSITES_PORT || '5001', 10);
 // Security middleware
 app.use((0, helmet_1.default)());
 app.use((0, cors_1.default)({
@@ -66,7 +66,7 @@ async function startServer() {
         await (0, database_2.connectToDatabase)();
         console.log('🔗 Database connected successfully');
         // Start server
-        app.listen(PORT, () => {
+        app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📊 Environment: ${process.env.NODE_ENV}`);
             console.log(`🔗 Health check: http://localhost:${PORT}/health`);
