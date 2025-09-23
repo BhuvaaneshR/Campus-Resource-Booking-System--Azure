@@ -59,10 +59,11 @@ app.use('*', (req, res) => {
         path: req.originalUrl
     });
 });
-// Initialize server (non-blocking database connection)
+// Initialize database connection and start server
 async function startServer() {
     try {
-        // Start server immediately - don't wait for database
+        // Connect to database
+        // Start server first - don't block on database
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📊 Environment: ${process.env.NODE_ENV}`);
@@ -77,6 +78,15 @@ async function startServer() {
             .catch((error) => {
             console.error('❌ Database connection failed (app still running):', error);
         });
+        return; // Exit function after starting server
+        console.log('🔗 Database connected successfully');
+        // Start server
+        app.listen(PORT, '0.0.0.0', () => {
+            console.log(`🚀 Server running on port ${PORT}`);
+            console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+            console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+            console.log('✅ Application started successfully!');
+        });
     }
     catch (error) {
         console.error('❌ Failed to start server:', error);
@@ -86,4 +96,4 @@ async function startServer() {
 // Start the application
 startServer();
 exports.default = app;
-//# sourceMappingURL=server.js.map
+//# sourceMappingURL=server-old.js.map
