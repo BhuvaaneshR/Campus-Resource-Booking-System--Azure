@@ -16,7 +16,7 @@ import { connectToDatabase, getPool } from './config/database';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || process.env.WEBSITES_PORT || 5001;
 
 // Security middleware
 app.use(helmet());
