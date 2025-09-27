@@ -6,6 +6,37 @@ import sql from 'mssql';
 
 const router = Router();
 
+// Ensure ProfileRequests table exists
+async function ensureProfileRequestsTable() {
+  const pool = await connectToDatabase();
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='ProfileRequests' AND xtype='U')
+    BEGIN
+      CREATE TABLE ProfileRequests (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        name NVARCHAR(200) NOT NULL,
+        email NVARCHAR(200) NOT NULL,
+        department NVARCHAR(200) NULL,
+        club NVARCHAR(200) NULL,
+        subject NVARCHAR(200) NULL,
+        role NVARCHAR(50) NOT NULL,
+        mobile NVARCHAR(50) NULL,
+        facultyId NVARCHAR(100) NULL,
+        rollNumber NVARCHAR(100) NULL,
+        password NVARCHAR(500) NULL,
+        status NVARCHAR(50) NOT NULL DEFAULT 'Pending',
+        createdAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        approvedAt DATETIME2 NULL,
+        approvedBy NVARCHAR(200) NULL,
+        rejectedAt DATETIME2 NULL,
+        rejectedBy NVARCHAR(200) NULL,
+        rejectionReason NVARCHAR(500) NULL
+      );
+      CREATE INDEX IX_ProfileRequests_Email ON ProfileRequests(email);
+    END
+  `);
+}
+
 // Microsoft Entra ID configuration
 const msalConfig = {
   auth: {

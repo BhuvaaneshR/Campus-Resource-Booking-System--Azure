@@ -6,9 +6,6 @@ interface User {
   email: string;
   name: string;
   role: string;
-  department?: string;
-  club?: string;
-  subject?: string;
 }
 
 interface LoginCredentials {
@@ -45,33 +42,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        console.log('Initializing auth...');
         // Check for existing JWT token
         const token = localStorage.getItem('token');
-        console.log('Stored token found:', !!token);
         if (token) {
           try {
             const result = await api.get('/auth/verify');
             if (result.data.valid) {
-              console.log('Token verification successful, setting user:', result.data.user);
               setUser(result.data.user);
               api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
             } else {
-              console.log('Token verification failed, removing token');
               localStorage.removeItem('token');
             }
           } catch (error) {
             console.error('Token verification failed:', error);
             localStorage.removeItem('token');
           }
-        } else {
-          console.log('No stored token found');
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
         localStorage.removeItem('token');
       } finally {
-        console.log('Auth initialization complete, setting loading to false');
         setLoading(false);
       }
     };
@@ -79,54 +69,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     initializeAuth();
   }, []);
 
-  // Debug: Log user state changes
-  useEffect(() => {
-    console.log('User state changed:', user ? { id: user.id, email: user.email, role: user.role } : null);
-  }, [user]);
-
   const login = async (credentials: LoginCredentials) => {
     try {
       setLoading(true);
-      console.log('Starting login process for:', credentials.email);
       
-      // First try profile-based authentication for regular users
-      try {
-        console.log('Attempting profile-based authentication...');
-        const response = await api.post('/profile-auth/login', credentials);
-        console.log('Profile auth response:', response.data);
-        
-        if (response.data.success) {
-          console.log('Profile authentication successful, setting user:', response.data.user);
-          setUser(response.data.user);
-          localStorage.setItem('token', response.data.token);
-          api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
-          return;
-        }
-      } catch (profileError: any) {
-        console.log('Profile auth error:', profileError);
-        
-        // Handle specific error cases for better user experience
-        if (profileError.response?.status === 403) {
-          throw new Error(profileError.response.data.error);
-        }
-        if (profileError.response?.status === 401) {
-          throw new Error(profileError.response.data.error);
-        }
-        
-        // Check if it's a network error
-        if (profileError.code === 'ERR_NETWORK' || profileError.message.includes('Network Error')) {
-          console.log('Network error detected, server may not be running');
-          // Fall through to admin check for development
-        } else {
-          console.log('Profile auth failed with error:', profileError.message);
-        }
-        
-        console.log('Profile auth failed, trying admin login...');
-      }
-      
-      // Fallback: Hardcoded admin credentials for system admin
+      // Hardcoded admin credentials
       if (credentials.email === 'admin@rajalakshmi.edu.in' && credentials.password === 'admin@1234') {
-        console.log('Using hardcoded admin credentials');
         const adminUser: User = {
           id: 'admin-1',
           email: 'admin@rajalakshmi.edu.in',
@@ -134,20 +82,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           role: 'Portal Admin'
         };
         
-        // Generate a mock token for consistency
+        // In a real app, this would come from your backend
         const mockToken = 'mock-jwt-token-for-admin';
         
         setUser(adminUser);
         localStorage.setItem('token', mockToken);
         api.defaults.headers.common['Authorization'] = `Bearer ${mockToken}`;
-        console.log('Admin login successful');
-        return;
+        
+        // In a real app, you would make an API call like this:
+        // const response = await api.post('/auth/login', credentials);
+        // setUser(response.data.user);
+        // localStorage.setItem('token', response.data.token);
+        // api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+      } else {
+        throw new Error('Invalid email or password');
       }
-      
-      // If neither profile auth nor admin login worked
-      throw new Error('Invalid email or password');
-      
-    } catch (error: any) {
+    } catch (error) {
       console.error('Login error:', error);
       throw error;
     } finally {

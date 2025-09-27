@@ -5,12 +5,14 @@ import { CssBaseline, Box } from '@mui/material';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
+import FacultyLayout from './components/FacultyLayout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import AdminProfileRequests from './pages/AdminProfileRequests';
 import Dashboard from './pages/Dashboard';
 import BookingForm from './pages/BookingForm';
 import Management from './pages/Management';
+import FacultyDashboard from './pages/faculty/FacultyDashboard';
 import './App.css';
 
 // Create Material-UI theme
@@ -31,10 +33,32 @@ const theme = createTheme({
   },
 });
 
-// Component to redirect users to the dashboard
+// Component to redirect users based on their role
 const AppRedirect: React.FC = () => {
   const { user } = useAuth();
-  return <Navigate to="/admin/dashboard" replace />;
+  
+  console.log('AppRedirect: Current user:', user ? { id: user.id, email: user.email, role: user.role } : null);
+  
+  if (!user) {
+    console.log('AppRedirect: No user found, redirecting to login');
+    return <Navigate to="/login" replace />;
+  }
+  
+  // Route based on user role
+  switch (user.role) {
+    case 'Portal Admin':
+      console.log('AppRedirect: Redirecting Portal Admin to /admin/dashboard');
+      return <Navigate to="/admin/dashboard" replace />;
+    case 'Faculty':
+      console.log('AppRedirect: Redirecting Faculty to /faculty/dashboard');
+      return <Navigate to="/faculty/dashboard" replace />;
+    case 'Student Coordinator':
+      console.log('AppRedirect: Redirecting Student Coordinator to /student/dashboard');
+      return <Navigate to="/student/dashboard" replace />;
+    default:
+      console.log('AppRedirect: Unknown role, redirecting to login:', user.role);
+      return <Navigate to="/login" replace />;
+  }
 };
 
 function App() {
@@ -52,7 +76,7 @@ function App() {
               <Route
                 path="/admin/*"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute allowedRoles={['Portal Admin']}>
                     <Layout>
                       <Routes>
                         <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
@@ -61,6 +85,40 @@ function App() {
                         <Route path="/booking/:id" element={<BookingForm />} />
                         <Route path="/management" element={<Management />} />
                         <Route path="/requests" element={<AdminProfileRequests />} />
+                      </Routes>
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Faculty Routes */}
+              <Route
+                path="/faculty/*"
+                element={
+                  <ProtectedRoute allowedRoles={['Faculty']}>
+                    <FacultyLayout>
+                      <Routes>
+                        <Route path="/" element={<Navigate to="/faculty/dashboard" replace />} />
+                        <Route path="/dashboard" element={<FacultyDashboard />} />
+                        <Route path="/booking" element={<BookingForm />} />
+                        <Route path="/booking/:id" element={<BookingForm />} />
+                      </Routes>
+                    </FacultyLayout>
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Student Coordinator Routes */}
+              <Route
+                path="/student/*"
+                element={
+                  <ProtectedRoute allowedRoles={['Student Coordinator']}>
+                    <Layout>
+                      <Routes>
+                        <Route path="/" element={<Navigate to="/student/dashboard" replace />} />
+                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/booking" element={<BookingForm />} />
+                        <Route path="/booking/:id" element={<BookingForm />} />
                       </Routes>
                     </Layout>
                   </ProtectedRoute>

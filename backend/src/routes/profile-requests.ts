@@ -5,7 +5,7 @@ import { authenticateToken, requireRole } from '../middleware/auth';
 
 const router = Router();
 
-// Ensure table exists
+// Ensure tables exist
 async function ensureTable() {
   const pool = await connectToDatabase();
   await pool.request().query(`
@@ -16,6 +16,8 @@ async function ensureTable() {
         name NVARCHAR(200) NOT NULL,
         email NVARCHAR(200) NOT NULL,
         department NVARCHAR(200) NULL,
+        club NVARCHAR(200) NULL,
+        subject NVARCHAR(200) NULL,
         role NVARCHAR(50) NOT NULL, -- 'Faculty' | 'Student Coordinator'
         mobile NVARCHAR(50) NULL,
         facultyId NVARCHAR(100) NULL,
@@ -39,6 +41,30 @@ async function ensureTable() {
         ALTER TABLE ProfileRequests ADD rejectedBy NVARCHAR(200) NULL;
       IF COL_LENGTH('ProfileRequests','rejectionReason') IS NULL
         ALTER TABLE ProfileRequests ADD rejectionReason NVARCHAR(500) NULL;
+      IF COL_LENGTH('ProfileRequests','club') IS NULL
+        ALTER TABLE ProfileRequests ADD club NVARCHAR(200) NULL;
+      IF COL_LENGTH('ProfileRequests','subject') IS NULL
+        ALTER TABLE ProfileRequests ADD subject NVARCHAR(200) NULL;
+    END
+  `);
+
+  // Ensure Users table exists so approvals do not fail
+  await pool.request().query(`
+    IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Users' AND xtype='U')
+    BEGIN
+      CREATE TABLE Users (
+        UserID INT IDENTITY(1,1) PRIMARY KEY,
+        email NVARCHAR(200) NOT NULL UNIQUE,
+        name NVARCHAR(200) NOT NULL,
+        role NVARCHAR(50) NOT NULL,
+        department NVARCHAR(200) NULL,
+        club NVARCHAR(200) NULL,
+        subject NVARCHAR(200) NULL,
+        isActive BIT NOT NULL DEFAULT 1,
+        createdAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        updatedAt DATETIME2 NULL
+      );
+      CREATE INDEX IX_Users_Email ON Users(email);
     END
   `);
 }
@@ -46,7 +72,7 @@ async function ensureTable() {
 // Public: submit a profile creation request
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, email, department, role, mobile, facultyId, rollNumber, password } = req.body || {};
+    const { name, email, department, club, subject, role, mobile, facultyId, rollNumber, password } = req.body || {};
 
     if (!name || !email || !role || !password) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -63,14 +89,16 @@ router.post('/', async (req: Request, res: Response) => {
       .input('name', sql.NVarChar, name)
       .input('email', sql.NVarChar, email)
       .input('department', sql.NVarChar, department || null)
+      .input('club', sql.NVarChar, club || null)
+      .input('subject', sql.NVarChar, subject || null)
       .input('role', sql.NVarChar, role)
       .input('mobile', sql.NVarChar, mobile || null)
       .input('facultyId', sql.NVarChar, facultyId || null)
       .input('rollNumber', sql.NVarChar, rollNumber || null)
       .input('password', sql.NVarChar, password) // TEMP
       .query(`
-        INSERT INTO ProfileRequests (name, email, department, role, mobile, facultyId, rollNumber, password)
-        VALUES (@name, @email, @department, @role, @mobile, @facultyId, @rollNumber, @password);
+        INSERT INTO ProfileRequests (name, email, department, club, subject, role, mobile, facultyId, rollNumber, password)
+        VALUES (@name, @email, @department, @club, @subject, @role, @mobile, @facultyId, @rollNumber, @password);
         SELECT SCOPE_IDENTITY() as id;
       `);
 
@@ -90,7 +118,7 @@ router.get('/', authenticateToken, requireRole(['Portal Admin']), async (req: Re
     const showAll = (req.query.all || 'false').toString().toLowerCase() === 'true';
     const statusFilter = req.query.status as string | undefined;
 
-    let query = `SELECT id, name, email, department, role, mobile, facultyId, rollNumber, status, createdAt, approvedAt, approvedBy, rejectedAt, rejectedBy, rejectionReason FROM ProfileRequests`;
+    let query = `SELECT id, name, email, department, club, subject, role, mobile, facultyId, rollNumber, status, createdAt, approvedAt, approvedBy, rejectedAt, rejectedBy, rejectionReason FROM ProfileRequests`;
     if (!showAll && !statusFilter) {
       query += ` WHERE status = 'Pending'`;
     } else if (statusFilter) {
@@ -139,14 +167,17 @@ router.post('/:id/approve', authenticateToken, requireRole(['Portal Admin']), as
       .input('email', sql.NVarChar, pr.email)
       .input('name', sql.NVarChar, pr.name)
       .input('role', sql.NVarChar, pr.role)
+      .input('department', sql.NVarChar, pr.department || null)
+      .input('club', sql.NVarChar, pr.club || null)
+      .input('subject', sql.NVarChar, pr.subject || null)
       .query(`
         MERGE Users AS target
-        USING (VALUES (@email, @name, @role, 1)) AS source (email, name, role, isActive)
+        USING (VALUES (@email, @name, @role, @department, @club, @subject, 1)) AS source (email, name, role, department, club, subject, isActive)
         ON target.email = source.email
         WHEN MATCHED THEN
-          UPDATE SET name = source.name, role = source.role, isActive = source.isActive
+          UPDATE SET name = source.name, role = source.role, department = source.department, club = source.club, subject = source.subject, isActive = source.isActive, updatedAt = SYSUTCDATETIME()
         WHEN NOT MATCHED THEN
-          INSERT (email, name, role, isActive) VALUES (source.email, source.name, source.role, source.isActive);
+          INSERT (email, name, role, department, club, subject, isActive) VALUES (source.email, source.name, source.role, source.department, source.club, source.subject, source.isActive);
       `);
 
     // Mark profile request approved

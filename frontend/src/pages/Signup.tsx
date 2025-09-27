@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Container,
@@ -17,11 +17,40 @@ const roles = [
   { value: 'Student Coordinator', label: 'Student Coordinator' },
 ];
 
+// Sample departments, clubs, and subjects (you can later move these to DB)
+const departments = [
+  'CSE',
+  'IT',
+  'ECE',
+  'EEE',
+  'Mechanical',
+  'Civil',
+];
+
+const clubs = [
+  'Coding Club',
+  'Robotics Club',
+  'Music Club',
+  'Sports Club',
+  'Literary Club',
+];
+
+const subjectsByDepartment: Record<string, string[]> = {
+  CSE: ['Cloud Computing', 'Data Structures', 'Operating Systems'],
+  IT: ['Web Technologies', 'Software Engineering'],
+  ECE: ['Digital Signal Processing', 'VLSI Design'],
+  EEE: ['Power Electronics', 'Control Systems'],
+  Mechanical: ['Engineering Graphics', 'Thermodynamics'],
+  Civil: ['Strength of Materials', 'Structural Analysis'],
+};
+
 const Signup: React.FC = () => {
   const [form, setForm] = useState({
     name: '',
     email: '',
     department: '',
+    club: '',
+    subject: '',
     role: 'Faculty' as 'Faculty' | 'Student Coordinator',
     mobile: '',
     facultyId: '',
@@ -34,8 +63,19 @@ const Signup: React.FC = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => {
+      // Reset dependent fields when parent changes
+      if (name === 'role') {
+        return { ...prev, role: value as any, club: '', subject: '' };
+      }
+      if (name === 'department') {
+        return { ...prev, department: value, subject: '' };
+      }
+      return { ...prev, [name]: value } as any;
+    });
   };
+
+  const subjectOptions = useMemo(() => subjectsByDepartment[form.department] || [], [form.department]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,6 +88,8 @@ const Signup: React.FC = () => {
         name: form.name.trim(),
         email: form.email.trim(),
         department: form.department.trim() || undefined,
+        club: form.role === 'Student Coordinator' ? form.club.trim() || undefined : undefined,
+        subject: form.role === 'Faculty' ? form.subject.trim() || undefined : undefined,
         role: form.role,
         mobile: form.mobile.trim() || undefined,
         facultyId: form.role === 'Faculty' ? form.facultyId.trim() || undefined : undefined,
@@ -55,7 +97,7 @@ const Signup: React.FC = () => {
         password: form.password,
       });
       setSuccess('Your request has been submitted successfully. The portal admin will review and approve it.');
-      setForm({ name: '', email: '', department: '', role: 'Faculty', mobile: '', facultyId: '', rollNumber: '', password: '' });
+      setForm({ name: '', email: '', department: '', club: '', subject: '', role: 'Faculty', mobile: '', facultyId: '', rollNumber: '', password: '' });
     } catch (err: any) {
       setError(err?.response?.data?.error || err?.message || 'Failed to submit request');
     } finally {
@@ -91,7 +133,11 @@ const Signup: React.FC = () => {
             <TextField label="Full Name" name="name" value={form.name} onChange={handleChange} fullWidth required />
             <TextField label="College Email" name="email" type="email" value={form.email} onChange={handleChange} fullWidth required placeholder="example@rajalakshmi.edu.in" />
 
-            <TextField label="Department" name="department" value={form.department} onChange={handleChange} fullWidth />
+            <TextField select label="Department" name="department" value={form.department} onChange={handleChange} fullWidth>
+              {departments.map((d) => (
+                <MenuItem key={d} value={d}>{d}</MenuItem>
+              ))}
+            </TextField>
             <TextField select label="Role" name="role" value={form.role} onChange={handleChange} fullWidth required>
               {roles.map((r) => (
                 <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>
@@ -101,11 +147,25 @@ const Signup: React.FC = () => {
             <TextField label="Mobile Number" name="mobile" value={form.mobile} onChange={handleChange} fullWidth />
 
             {form.role === 'Faculty' && (
-              <TextField label="Faculty ID" name="facultyId" value={form.facultyId} onChange={handleChange} fullWidth />
+              <>
+                <TextField label="Faculty ID" name="facultyId" value={form.facultyId} onChange={handleChange} fullWidth />
+                <TextField select label="Subject" name="subject" value={form.subject} onChange={handleChange} fullWidth disabled={!form.department} helperText={!form.department ? 'Select department first' : undefined}>
+                  {subjectOptions.map((s) => (
+                    <MenuItem key={s} value={s}>{s}</MenuItem>
+                  ))}
+                </TextField>
+              </>
             )}
 
             {form.role === 'Student Coordinator' && (
-              <TextField label="Roll Number" name="rollNumber" value={form.rollNumber} onChange={handleChange} fullWidth />
+              <>
+                <TextField label="Roll Number" name="rollNumber" value={form.rollNumber} onChange={handleChange} fullWidth />
+                <TextField select label="Club" name="club" value={form.club} onChange={handleChange} fullWidth>
+                  {clubs.map((c) => (
+                    <MenuItem key={c} value={c}>{c}</MenuItem>
+                  ))}
+                </TextField>
+              </>
             )}
 
             <TextField label="Password" name="password" type="password" value={form.password} onChange={handleChange} fullWidth required />

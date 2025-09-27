@@ -61,9 +61,9 @@ const Login: React.FC = () => {
         password: values.password,
       });
       
-      // Redirect to the intended page or default to admin dashboard
-      const from = location.state?.from?.pathname || '/admin/dashboard';
-      navigate(from, { replace: true });
+      // The AuthProvider will handle role-based routing automatically
+      // Just navigate to root and let AppRedirect component handle the routing
+      navigate('/', { replace: true });
     } catch (error: any) {
       setError(error.message || 'Login failed. Please try again.');
     }

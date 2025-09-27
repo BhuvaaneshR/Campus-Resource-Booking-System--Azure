@@ -5,9 +5,10 @@ import { Box, CircularProgress, Typography } from '@mui/material';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
+  allowedRoles?: string[];
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
   const { isAuthenticated, loading, user } = useAuth();
 
   if (loading) {
@@ -32,8 +33,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     return <Navigate to="/login" state={{ from: window.location.pathname }} replace />;
   }
 
-  // If user is not an admin, show access denied
-  if (user?.role !== 'Portal Admin') {
+  // Check role-based access if allowedRoles is specified
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
     return (
       <Box
         display="flex"
@@ -47,9 +48,12 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
           Access Denied
         </Typography>
         <Typography variant="h6" align="center" gutterBottom>
-          You don't have permission to access this portal.
+          You don't have permission to access this section.
         </Typography>
         <Typography variant="body1" color="textSecondary" align="center">
+          Current role: {user.role}
+        </Typography>
+        <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
           Please contact the system administrator if you believe this is an error.
         </Typography>
       </Box>

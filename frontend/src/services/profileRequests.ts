@@ -4,6 +4,8 @@ export interface ProfileRequestInput {
   name: string;
   email: string;
   department?: string;
+  club?: string;
+  subject?: string;
   role: 'Faculty' | 'Student Coordinator';
   mobile?: string;
   facultyId?: string;
@@ -16,6 +18,8 @@ export interface ProfileRequestItem {
   name: string;
   email: string;
   department?: string;
+  club?: string;
+  subject?: string;
   role: 'Faculty' | 'Student Coordinator';
   mobile?: string;
   facultyId?: string;

@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { authRoutes } from './routes/auth';
+import { profileAuthRoutes } from './routes/profile-auth';
 import { bookingRoutes } from './routes/bookings';
 import { resourceRoutes } from './routes/resources';
 import { databaseRoutes } from './routes/database';
@@ -50,6 +51,7 @@ app.get('/health', async (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/profile-auth', profileAuthRoutes); // Profile-based authentication
 app.use('/api/bookings', authenticateToken, bookingRoutes);
 app.use('/api/resources', authenticateToken, resourceRoutes);
 app.use('/api/db', databaseRoutes); // Direct database access routes
