@@ -10,6 +10,7 @@ import { databaseRoutes } from './routes/database';
 import { campusDbRoutes } from './routes/campus-db';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticateToken } from './middleware/auth';
+import { profileRequestRoutes } from './routes/profile-requests';
 import { connectToDatabase, getPool } from './config/database';
 
 // Load environment variables
@@ -53,6 +54,7 @@ app.use('/api/bookings', authenticateToken, bookingRoutes);
 app.use('/api/resources', authenticateToken, resourceRoutes);
 app.use('/api/db', databaseRoutes); // Direct database access routes
 app.use('/api/campus', campusDbRoutes); // Campus database routes for existing schema
+app.use('/api/profile-requests', profileRequestRoutes); // Public submit; admin ops protected per-route
 
 // Error handling middleware
 app.use(errorHandler);

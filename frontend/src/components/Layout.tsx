@@ -66,14 +66,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const handleSearch = (event: React.FormEvent) => {
     event.preventDefault();
     if (searchQuery.trim()) {
-      navigate(`/management?search=${encodeURIComponent(searchQuery.trim())}`);
+      navigate(`/admin/management?search=${encodeURIComponent(searchQuery.trim())}`);
     }
   };
 
   const menuItems = [
-    { text: 'Dashboard', icon: <Dashboard />, path: '/dashboard' },
-    { text: 'Book a Resource', icon: <Add />, path: '/booking' },
-    { text: 'Manage Bookings', icon: <ManageAccounts />, path: '/management' },
+    { text: 'Dashboard', icon: <Dashboard />, path: '/admin/dashboard' },
+    { text: 'Book a Resource', icon: <Add />, path: '/admin/booking' },
+    { text: 'Manage Bookings', icon: <ManageAccounts />, path: '/admin/management' },
   ];
 
   const drawer = (
@@ -88,7 +88,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
-              selected={location.pathname === item.path}
+              selected={location.pathname.startsWith(item.path)}
               onClick={() => {
                 navigate(item.path);
                 setMobileOpen(false);
@@ -242,6 +242,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </Typography>
         </MenuItem>
         <Divider />
+        <MenuItem onClick={() => { navigate('/admin/requests'); handleMenuClose(); }}>
+          <ListItemIcon>
+            <ManageAccounts fontSize="small" />
+          </ListItemIcon>
+          Profile Creation Requests
+        </MenuItem>
         <MenuItem onClick={handleMenuClose}>
           <ListItemIcon>
             <AccountCircle fontSize="small" />

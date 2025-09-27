@@ -28,10 +28,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // Store the current location so we can redirect back after login
+    return <Navigate to="/login" state={{ from: window.location.pathname }} replace />;
   }
 
-  // Check if user has admin role
+  // If user is not an admin, show access denied
   if (user?.role !== 'Portal Admin') {
     return (
       <Box
@@ -40,12 +41,16 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         justifyContent="center"
         alignItems="center"
         minHeight="100vh"
+        p={3}
       >
-        <Typography variant="h4" color="error" gutterBottom>
+        <Typography variant="h4" color="error" gutterBottom align="center">
           Access Denied
         </Typography>
-        <Typography variant="h6">
+        <Typography variant="h6" align="center" gutterBottom>
           You don't have permission to access this portal.
+        </Typography>
+        <Typography variant="body1" color="textSecondary" align="center">
+          Please contact the system administrator if you believe this is an error.
         </Typography>
       </Box>
     );

@@ -2,27 +2,16 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, Box } from '@mui/material';
-import { useAuth } from './contexts/AuthContext';
-import { MsalProvider } from '@azure/msal-react';
-import { PublicClientApplication } from '@azure/msal-browser';
-import { msalConfig } from './config/authConfig';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
-import FacultyLayout from './components/FacultyLayout';
-import RoleSwitcher from './components/RoleSwitcher';
 import Login from './pages/Login';
+import Signup from './pages/Signup';
+import AdminProfileRequests from './pages/AdminProfileRequests';
 import Dashboard from './pages/Dashboard';
 import BookingForm from './pages/BookingForm';
 import Management from './pages/Management';
-// Faculty Pages
-import FacultyDashboard from './pages/faculty/FacultyDashboard';
-import BookingRequestForm from './pages/faculty/BookingRequestForm';
-import MyBookings from './pages/faculty/MyBookings';
 import './App.css';
-
-// Create MSAL instance
-const msalInstance = new PublicClientApplication(msalConfig);
 
 // Create Material-UI theme
 const theme = createTheme({
@@ -42,82 +31,56 @@ const theme = createTheme({
   },
 });
 
-// Component to redirect users based on their role
-const RoleBasedRedirect: React.FC = () => {
+// Component to redirect users to the dashboard
+const AppRedirect: React.FC = () => {
   const { user } = useAuth();
-  
-  if (user?.role === 'Faculty' || user?.role === 'Placement Executive') {
-    return <Navigate to="/faculty/dashboard" replace />;
-  } else if (user?.role === 'Portal Admin') {
-    return <Navigate to="/admin/dashboard" replace />;
-  } else {
-    // Default fallback to admin for unknown roles
-    return <Navigate to="/admin/dashboard" replace />;
-  }
+  return <Navigate to="/admin/dashboard" replace />;
 };
 
 function App() {
   return (
-    <MsalProvider instance={msalInstance}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <AuthProvider>
-          <Router>
-            <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-              <RoleSwitcher />
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                
-                {/* Admin Routes */}
-                <Route
-                  path="/admin/*"
-                  element={
-                    <ProtectedRoute>
-                      <Layout>
-                        <Routes>
-                          <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
-                          <Route path="/dashboard" element={<Dashboard />} />
-                          <Route path="/booking" element={<BookingForm />} />
-                          <Route path="/booking/:id" element={<BookingForm />} />
-                          <Route path="/management" element={<Management />} />
-                        </Routes>
-                      </Layout>
-                    </ProtectedRoute>
-                  }
-                />
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <AuthProvider>
+        <Router>
+          <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              
+              {/* Admin Routes */}
+              <Route
+                path="/admin/*"
+                element={
+                  <ProtectedRoute>
+                    <Layout>
+                      <Routes>
+                        <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
+                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/booking" element={<BookingForm />} />
+                        <Route path="/booking/:id" element={<BookingForm />} />
+                        <Route path="/management" element={<Management />} />
+                        <Route path="/requests" element={<AdminProfileRequests />} />
+                      </Routes>
+                    </Layout>
+                  </ProtectedRoute>
+                }
+              />
 
-                {/* Faculty Routes */}
-                <Route
-                  path="/faculty/*"
-                  element={
-                    <ProtectedRoute>
-                      <FacultyLayout>
-                        <Routes>
-                          <Route path="/" element={<Navigate to="/faculty/dashboard" replace />} />
-                          <Route path="/dashboard" element={<FacultyDashboard />} />
-                          <Route path="/booking-request" element={<BookingRequestForm />} />
-                          <Route path="/my-bookings" element={<MyBookings />} />
-                        </Routes>
-                      </FacultyLayout>
-                    </ProtectedRoute>
-                  }
-                />
-
-                {/* Default Route - Redirect based on user role */}
-                <Route
-                  path="/*"
-                  element={
-                    <ProtectedRoute>
-                      <RoleBasedRedirect />
-                    </ProtectedRoute>
-                  }
-                />
-              </Routes>
-            </Box>
-          </Router>
-        </AuthProvider>
-      </ThemeProvider>
-    </MsalProvider>
+              {/* Default Route - Redirect to admin dashboard */}
+              <Route
+                path="/*"
+                element={
+                  <ProtectedRoute>
+                    <AppRedirect />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+          </Box>
+        </Router>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
