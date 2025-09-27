@@ -190,7 +190,45 @@ router.post('/bookings', async (req: Request, res: Response) => {
     }
 
     const pool = await connectToDatabase();
-    
+
+    // Resolve admin ID: if not provided, try to pick a default active admin
+    let resolvedAdminId: number | null = adminId ?? null;
+    if (!resolvedAdminId) {
+      const adminResult = await pool.request().query(`
+        SELECT TOP 1 AdminID
+        FROM dbo.Admins
+        WHERE IsActive = 1
+        ORDER BY AdminID ASC
+      `);
+      if (adminResult.recordset.length > 0) {
+        resolvedAdminId = adminResult.recordset[0].AdminID;
+      } else {
+        // Try to upsert a default admin based on the permanent admin email
+        const defaultAdminEmail = 'admin@rajalakshmi.edu.in';
+        // Ensure a row exists in Admins
+        const upsert = await pool.request()
+          .input('AdminName', sql.NVarChar, 'Portal Admin')
+          .input('AdminEmail', sql.NVarChar, defaultAdminEmail)
+          .query(`
+            IF EXISTS (SELECT 1 FROM dbo.Admins WHERE AdminEmail = @AdminEmail)
+            BEGIN
+              UPDATE dbo.Admins SET AdminName = @AdminName, IsActive = 1 WHERE AdminEmail = @AdminEmail;
+            END
+            ELSE
+            BEGIN
+              INSERT INTO dbo.Admins (AdminName, AdminEmail, IsActive) VALUES (@AdminName, @AdminEmail, 1);
+            END
+          `);
+        // Read back the AdminID
+        const fetchAdmin = await pool.request()
+          .input('AdminEmail', sql.NVarChar, defaultAdminEmail)
+          .query(`SELECT TOP 1 AdminID FROM dbo.Admins WHERE AdminEmail = @AdminEmail AND IsActive = 1`);
+        if (fetchAdmin.recordset.length > 0) {
+          resolvedAdminId = fetchAdmin.recordset[0].AdminID;
+        }
+      }
+    }
+
     // Check for conflicts
     const conflictCheck = await pool.request()
       .input('resourceId', sql.Int, resourceId)
@@ -216,7 +254,7 @@ router.post('/bookings', async (req: Request, res: Response) => {
     // Create booking
     const result = await pool.request()
       .input('resourceId', sql.Int, resourceId)
-      .input('adminId', sql.Int, adminId || null)
+      .input('adminId', sql.Int, resolvedAdminId)
       .input('requestedByName', sql.NVarChar, requestedByName)
       .input('requestedByEmail', sql.NVarChar, requestedByEmail)
       .input('eventTitle', sql.NVarChar, eventTitle)
@@ -247,7 +285,8 @@ router.post('/bookings', async (req: Request, res: Response) => {
     console.error('Error creating booking:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create booking'
+      error: 'Failed to create booking',
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });
