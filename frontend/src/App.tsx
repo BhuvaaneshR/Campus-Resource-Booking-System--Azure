@@ -69,6 +69,7 @@ function App() {
         <Router>
           <Box sx={{ display: 'flex', minHeight: '100vh' }}>
             <Routes>
+              <Route path="/" element={<AppRedirect />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
               
