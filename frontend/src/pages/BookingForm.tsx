@@ -21,6 +21,7 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import dayjs, { Dayjs } from 'dayjs';
 import { Save, Cancel } from '@mui/icons-material';
 import api from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Resource {
   id: number;
@@ -47,6 +48,7 @@ const BookingForm: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEdit = !!id;
+  const { user } = useAuth();
 
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(false);
@@ -187,12 +189,20 @@ const BookingForm: React.FC = () => {
           isPriority: false
         };
         await api.post('/campus/bookings', campusBookingData);
-        setSuccess('Booking created successfully!');
+        setSuccess(user?.role === 'Faculty' ? 'Request submitted successfully! Awaiting admin approval.' : 'Booking created successfully!');
       }
 
       setTimeout(() => {
-        navigate('/dashboard');
-      }, 2000);
+        if (user?.role === 'Portal Admin') {
+          navigate('/admin/dashboard');
+        } else if (user?.role === 'Faculty') {
+          navigate('/faculty/dashboard');
+        } else if (user?.role === 'Student Coordinator') {
+          navigate('/student/dashboard');
+        } else {
+          navigate('/login');
+        }
+      }, 1500);
 
     } catch (error: any) {
       setError(error.response?.data?.error || 'Failed to save booking');
@@ -343,7 +353,11 @@ const BookingForm: React.FC = () => {
                       disabled={loading}
                       startIcon={loading ? <CircularProgress size={20} /> : <Save />}
                     >
-                      {loading ? 'Saving...' : (isEdit ? 'Update Booking' : 'Create Booking')}
+                      {loading
+                        ? 'Saving...'
+                        : (isEdit
+                            ? 'Update Booking'
+                            : (user?.role === 'Faculty' ? 'Request Resource' : 'Create Booking'))}
                     </Button>
                   </Box>
               </Box>

@@ -52,7 +52,7 @@ interface MyBooking {
   endDate: string;
   startTime: string;
   endTime: string;
-  status: 'Pending Approval' | 'Confirmed' | 'Rejected' | 'Cancelled' | 'Cancelled - Overridden';
+  status: 'Pending' | 'Confirmed' | 'Denied' | 'Cancelled' | 'Completed';
   requesterName: string;
   requesterEmail: string;
   contactPhone: string;
@@ -84,9 +84,37 @@ const MyBookings: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const response = await api.get('/api/bookings/my-requests');
-      setBookings(response.data.bookings || []);
+      if (!user?.email) throw new Error('Missing user email');
+      const res = await api.get('/campus/bookings', {
+        params: { requestedByEmail: user.email },
+      });
+      const rows = (res.data?.data || []) as Array<any>;
+      const mapped: MyBooking[] = rows.map((r) => {
+        const start = new Date(r.startDateTime);
+        const end = new Date(r.endDateTime);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const timeStr = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+        const dateStr = (d: Date) => d.toISOString().substring(0, 10);
+        return {
+          id: String(r.id),
+          eventName: r.eventName,
+          resourceName: r.resourceName,
+          location: r.location,
+          startDate: dateStr(start),
+          endDate: dateStr(end),
+          startTime: timeStr(start),
+          endTime: timeStr(end),
+          status: (r.status as MyBooking['status']) || 'Pending',
+          requesterName: r.inchargeName,
+          requesterEmail: r.inchargeEmail,
+          contactPhone: '',
+          attendeeCount: r.participantCount || 0,
+          createdAt: r.createdAt || new Date().toISOString(),
+          approvedBy: r.adminName || undefined,
+          rejectionReason: r.denialReason || undefined,
+        };
+      });
+      setBookings(mapped);
       
     } catch (err: any) {
       console.error('Error fetching my bookings:', err);
@@ -119,10 +147,10 @@ const MyBookings: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Confirmed': return 'success';
-      case 'Pending Approval': return 'warning';
-      case 'Rejected': return 'error';
+      case 'Pending': return 'warning';
+      case 'Denied': return 'error';
       case 'Cancelled': return 'default';
-      case 'Cancelled - Overridden': return 'secondary';
+      case 'Completed': return 'secondary';
       default: return 'default';
     }
   };
@@ -130,10 +158,10 @@ const MyBookings: React.FC = () => {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'Confirmed': return '✓';
-      case 'Pending Approval': return '⏳';
-      case 'Rejected': return '✗';
+      case 'Pending': return '⏳';
+      case 'Denied': return '✗';
       case 'Cancelled': return '🚫';
-      case 'Cancelled - Overridden': return '⚠️';
+      case 'Completed': return '⚠️';
       default: return '';
     }
   };
@@ -155,12 +183,12 @@ const MyBookings: React.FC = () => {
   };
 
   const canCancelBooking = (booking: MyBooking) => {
-    return ['Pending Approval', 'Confirmed'].includes(booking.status) &&
+    return ['Pending', 'Confirmed'].includes(booking.status) &&
            new Date(booking.startDate) > new Date();
   };
 
   const canEditBooking = (booking: MyBooking) => {
-    return booking.status === 'Pending Approval' &&
+    return booking.status === 'Pending' &&
            new Date(booking.startDate) > new Date();
   };
 
@@ -173,9 +201,9 @@ const MyBookings: React.FC = () => {
   // Group bookings by status for summary
   const bookingSummary = {
     total: bookings.length,
-    pending: bookings.filter(b => b.status === 'Pending Approval').length,
+    pending: bookings.filter(b => b.status === 'Pending').length,
     confirmed: bookings.filter(b => b.status === 'Confirmed').length,
-    rejected: bookings.filter(b => b.status === 'Rejected').length,
+    rejected: bookings.filter(b => b.status === 'Denied').length,
   };
 
   if (loading) {
@@ -267,11 +295,11 @@ const MyBookings: React.FC = () => {
             label="Filter by Status"
           >
             <MenuItem value="all">All Statuses</MenuItem>
-            <MenuItem value="Pending Approval">Pending Approval</MenuItem>
+            <MenuItem value="Pending">Pending</MenuItem>
             <MenuItem value="Confirmed">Confirmed</MenuItem>
-            <MenuItem value="Rejected">Rejected</MenuItem>
+            <MenuItem value="Denied">Denied</MenuItem>
             <MenuItem value="Cancelled">Cancelled</MenuItem>
-            <MenuItem value="Cancelled - Overridden">Overridden</MenuItem>
+            <MenuItem value="Completed">Completed</MenuItem>
           </Select>
         </FormControl>
         <Typography variant="body2" color="text.secondary">

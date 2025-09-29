@@ -248,6 +248,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </ListItemIcon>
           Profile Creation Requests
         </MenuItem>
+        <MenuItem onClick={() => { navigate('/admin/booking-requests'); handleMenuClose(); }}>
+          <ListItemIcon>
+            <ManageAccounts fontSize="small" />
+          </ListItemIcon>
+          Resource Booking Requests
+        </MenuItem>
         <MenuItem onClick={handleMenuClose}>
           <ListItemIcon>
             <AccountCircle fontSize="small" />

@@ -8,6 +8,20 @@ const router = Router();
 router.get('/test', async (req: Request, res: Response) => {
   try {
     const pool = await connectToDatabase();
+
+    // Ensure Admins table exists (safety for first-time setups)
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Admins' AND xtype='U')
+      BEGIN
+        CREATE TABLE dbo.Admins (
+          AdminID INT IDENTITY(1,1) PRIMARY KEY,
+          AdminName NVARCHAR(200) NOT NULL,
+          AdminEmail NVARCHAR(200) NOT NULL UNIQUE,
+          IsActive BIT NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IX_Admins_Email ON dbo.Admins(AdminEmail);
+      END
+    `);
     const result = await pool.request().query('SELECT 1 as test');
     
     res.json({
@@ -88,8 +102,17 @@ router.get('/admins', async (req: Request, res: Response) => {
 // Get all bookings with resource and admin details
 router.get('/bookings', async (req: Request, res: Response) => {
   try {
+    const { requestedByEmail } = req.query as { requestedByEmail?: string };
     const pool = await connectToDatabase();
-    const result = await pool.request().query(`
+    const request = pool.request();
+
+    let where = '';
+    if (requestedByEmail) {
+      request.input('requestedByEmail', sql.NVarChar, String(requestedByEmail).trim().toLowerCase());
+      where = 'WHERE LOWER(b.RequestedByEmail) = @requestedByEmail';
+    }
+
+    const result = await request.query(`
       SELECT 
         b.BookingID as id,
         b.EventTitle as eventName,
@@ -102,6 +125,7 @@ router.get('/bookings', async (req: Request, res: Response) => {
         b.IsPriority as isPriority,
         b.CreatedAt as createdAt,
         b.LastModifiedAt as updatedAt,
+        b.DenialReason as denialReason,
         r.ResourceName as resourceName,
         r.ResourceType as resourceType,
         r.Location as location,
@@ -111,6 +135,7 @@ router.get('/bookings', async (req: Request, res: Response) => {
       FROM dbo.Bookings b
       INNER JOIN dbo.Resources r ON b.ResourceID = r.ResourceID
       LEFT JOIN dbo.Admins a ON b.AdminID = a.AdminID
+      ${where}
       ORDER BY b.StartTime DESC
     `);
 
@@ -251,8 +276,8 @@ router.post('/bookings', async (req: Request, res: Response) => {
       });
     }
 
-    // Create booking
-    const result = await pool.request()
+    // Create booking (avoid OUTPUT due to table triggers)
+    const insertResult = await pool.request()
       .input('resourceId', sql.Int, resourceId)
       .input('adminId', sql.Int, resolvedAdminId)
       .input('requestedByName', sql.NVarChar, requestedByName)
@@ -264,23 +289,20 @@ router.post('/bookings', async (req: Request, res: Response) => {
       .input('isPriority', sql.Bit, isPriority || false)
       .query(`
         INSERT INTO dbo.Bookings (
-          ResourceID, AdminID, RequestedByName, RequestedByEmail, 
-          EventTitle, StartTime, EndTime, BookingStatus, 
+          ResourceID, AdminID, RequestedByName, RequestedByEmail,
+          EventTitle, StartTime, EndTime, BookingStatus,
           BookingCategory, IsPriority, CreatedAt, LastModifiedAt
-        )
-        OUTPUT INSERTED.*
-        VALUES (
+        ) VALUES (
           @resourceId, @adminId, @requestedByName, @requestedByEmail,
           @eventTitle, @startTime, @endTime, 'Pending',
           @bookingCategory, @isPriority, GETDATE(), GETDATE()
-        )
+        );
       `);
-
-    res.status(201).json({
-      success: true,
-      message: 'Booking created successfully',
-      data: result.recordset[0]
-    });
+    // Read back the last inserted row for response
+    const created = await pool.request().query(`
+      SELECT TOP 1 * FROM dbo.Bookings ORDER BY BookingID DESC
+    `);
+    res.status(201).json({ success: true, message: 'Booking created successfully', data: created.recordset[0] });
   } catch (error) {
     console.error('Error creating booking:', error);
     res.status(500).json({
@@ -295,28 +317,81 @@ router.post('/bookings', async (req: Request, res: Response) => {
 router.put('/bookings/:id/status', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status, adminId } = req.body;
+    const { status, adminId, denialReason } = req.body;
 
-    if (!['Pending', 'Confirmed', 'Cancelled', 'Completed'].includes(status)) {
+    if (!['Pending', 'Confirmed', 'Cancelled', 'Completed', 'Denied'].includes(status)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid status. Must be: Pending, Confirmed, Cancelled, or Completed'
+        error: 'Invalid status. Must be: Pending, Confirmed, Cancelled, Completed, or Denied'
       });
     }
 
     const pool = await connectToDatabase();
-    const result = await pool.request()
-      .input('id', sql.Int, id)
-      .input('status', sql.NVarChar, status)
-      .input('adminId', sql.Int, adminId || null)
-      .query(`
-        UPDATE dbo.Bookings 
-        SET BookingStatus = @status, 
-            AdminID = @adminId,
-            LastModifiedAt = GETDATE()
-        OUTPUT INSERTED.*
-        WHERE BookingID = @id
+
+    // Resolve AdminID robustly, ignoring client-sent adminId to avoid type issues
+    let resolvedAdminId: number | null = null;
+    try {
+      // Try any existing admin row
+      const adminResult = await pool.request().query(`
+        SELECT TOP 1 AdminID FROM dbo.Admins ORDER BY AdminID ASC
       `);
+      if (adminResult.recordset.length > 0) {
+        const val = adminResult.recordset[0].AdminID;
+        const n = typeof val === 'number' ? val : parseInt(String(val), 10);
+        resolvedAdminId = Number.isFinite(n) ? n : null;
+      } else {
+        // Create a default admin if table empty
+        const defaultAdminEmail = 'admin@rajalakshmi.edu.in';
+        await pool.request()
+          .input('AdminName', sql.NVarChar, 'Portal Admin')
+          .input('AdminEmail', sql.NVarChar, defaultAdminEmail)
+          .query(`
+            INSERT INTO dbo.Admins (AdminName, AdminEmail, IsActive)
+            SELECT TOP 1 'Portal Admin', @AdminEmail, 1
+            WHERE NOT EXISTS (SELECT 1 FROM dbo.Admins WHERE AdminEmail = @AdminEmail);
+          `);
+        const fetchAdmin = await pool.request()
+          .input('AdminEmail', sql.NVarChar, defaultAdminEmail)
+          .query(`SELECT TOP 1 AdminID FROM dbo.Admins WHERE AdminEmail = @AdminEmail`);
+        if (fetchAdmin.recordset.length > 0) {
+          const n = parseInt(String(fetchAdmin.recordset[0].AdminID), 10);
+          resolvedAdminId = Number.isFinite(n) ? n : null;
+        }
+      }
+    } catch (_) {
+      resolvedAdminId = null; // Fall back to null; DB column AdminID is nullable
+    }
+
+    let result;
+    if (status === 'Denied') {
+      const updateRes = await pool.request()
+        .input('id', sql.Int, id)
+        .input('status', sql.NVarChar, status)
+        .input('adminId', sql.Int, resolvedAdminId === null ? null : resolvedAdminId)
+        .input('denialReason', sql.NVarChar, denialReason || 'No reason specified')
+        .query(`
+          UPDATE dbo.Bookings 
+          SET BookingStatus = @status, 
+              AdminID = @adminId,
+              DenialReason = @denialReason,
+              LastModifiedAt = GETDATE()
+          WHERE BookingID = @id
+        `);
+      result = await pool.request().input('id', sql.Int, id).query('SELECT * FROM dbo.Bookings WHERE BookingID = @id');
+    } else {
+      const updateRes = await pool.request()
+        .input('id', sql.Int, id)
+        .input('status', sql.NVarChar, status)
+        .input('adminId', sql.Int, resolvedAdminId)
+        .query(`
+          UPDATE dbo.Bookings 
+          SET BookingStatus = @status, 
+              AdminID = @adminId,
+              LastModifiedAt = GETDATE()
+          WHERE BookingID = @id
+        `);
+      result = await pool.request().input('id', sql.Int, id).query('SELECT * FROM dbo.Bookings WHERE BookingID = @id');
+    }
 
     if (result.recordset.length === 0) {
       return res.status(404).json({
@@ -331,7 +406,7 @@ router.put('/bookings/:id/status', async (req: Request, res: Response) => {
         .input('bookingId', sql.Int, id)
         .input('adminId', sql.Int, adminId)
         .input('action', sql.NVarChar, `Status changed to ${status}`)
-        .input('details', sql.NVarChar, `Booking status updated from system`)
+        .input('details', sql.NVarChar, status === 'Denied' ? `Reason: ${denialReason || 'No reason specified'}` : `Booking status updated from system`)
         .query(`
           INSERT INTO dbo.AuditLogs (BookingID, AdminID, Action, Details, Timestamp)
           VALUES (@bookingId, @adminId, @action, @details, GETDATE())
@@ -347,7 +422,8 @@ router.put('/bookings/:id/status', async (req: Request, res: Response) => {
     console.error('Error updating booking status:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to update booking status'
+      error: 'Failed to update booking status',
+      details: error instanceof Error ? error.message : String(error)
     });
   }
 });

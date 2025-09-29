@@ -9,10 +9,12 @@ import FacultyLayout from './components/FacultyLayout';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import AdminProfileRequests from './pages/AdminProfileRequests';
+import AdminBookingRequests from './pages/AdminBookingRequests';
 import Dashboard from './pages/Dashboard';
 import BookingForm from './pages/BookingForm';
 import Management from './pages/Management';
 import FacultyDashboard from './pages/faculty/FacultyDashboard';
+import MyBookings from './pages/faculty/MyBookings';
 import './App.css';
 
 // Create Material-UI theme
@@ -86,6 +88,7 @@ function App() {
                         <Route path="/booking/:id" element={<BookingForm />} />
                         <Route path="/management" element={<Management />} />
                         <Route path="/requests" element={<AdminProfileRequests />} />
+                        <Route path="/booking-requests" element={<AdminBookingRequests />} />
                       </Routes>
                     </Layout>
                   </ProtectedRoute>
@@ -102,6 +105,8 @@ function App() {
                         <Route path="/" element={<Navigate to="/faculty/dashboard" replace />} />
                         <Route path="/dashboard" element={<FacultyDashboard />} />
                         <Route path="/booking" element={<BookingForm />} />
+                        <Route path="/booking-request" element={<BookingForm />} />
+                        <Route path="/my-bookings" element={<MyBookings />} />
                         <Route path="/booking/:id" element={<BookingForm />} />
                       </Routes>
                     </FacultyLayout>
