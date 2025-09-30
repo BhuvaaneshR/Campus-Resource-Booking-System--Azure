@@ -29,6 +29,48 @@ router.get('/test', async (req: Request, res: Response) => {
       message: 'Database connection successful',
       data: result.recordset
     });
+
+// Delete a booking by ID (hard delete; if constrained, fall back to set Cancelled)
+router.delete('/bookings/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const pool = await connectToDatabase();
+
+    // Try hard delete first
+    const del = await pool.request()
+      .input('id', sql.Int, id)
+      .query('DELETE FROM dbo.Bookings WHERE BookingID = @id');
+
+    if (del.rowsAffected && del.rowsAffected[0] > 0) {
+      return res.json({ success: true, message: 'Booking deleted' });
+    }
+
+    // If not found, return 404
+    const exists = await pool.request().input('id', sql.Int, id).query('SELECT 1 FROM dbo.Bookings WHERE BookingID = @id');
+    if (exists.recordset.length === 0) {
+      return res.status(404).json({ success: false, error: 'Booking not found' });
+    }
+
+    // Fallback: set status to Cancelled
+    await pool.request()
+      .input('id', sql.Int, id)
+      .query(`UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id`);
+
+    return res.json({ success: true, message: 'Booking cancelled (could not hard delete due to constraints)' });
+  } catch (error) {
+    console.error('Error deleting booking:', error);
+    // Last resort fallback: try to cancel
+    try {
+      const pool = await connectToDatabase();
+      await pool.request()
+        .input('id', sql.Int, id)
+        .query(`UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id`);
+      return res.json({ success: true, message: 'Booking cancelled (delete failed)' });
+    } catch (err2) {
+      return res.status(500).json({ success: false, error: 'Failed to delete or cancel booking', details: error instanceof Error ? error.message : String(error) });
+    }
+  }
+});
   } catch (error) {
     console.error('Database test failed:', error);
     res.status(500).json({
@@ -276,6 +318,19 @@ router.post('/bookings', async (req: Request, res: Response) => {
       });
     }
 
+    // Decide initial status: Portal Admin requests are auto-confirmed
+    let initialStatus: 'Confirmed' | 'Pending' = 'Pending';
+    try {
+      const adminCheck = await pool.request()
+        .input('reqEmail', sql.NVarChar, String(requestedByEmail || '').trim().toLowerCase())
+        .query(`SELECT TOP 1 1 AS isAdmin FROM dbo.Admins WHERE LOWER(AdminEmail) = @reqEmail`);
+      if (adminCheck.recordset.length > 0) {
+        initialStatus = 'Confirmed';
+      }
+    } catch (_) {
+      // fail open to Pending
+    }
+
     // Create booking (avoid OUTPUT due to table triggers)
     const insertResult = await pool.request()
       .input('resourceId', sql.Int, resourceId)
@@ -287,6 +342,7 @@ router.post('/bookings', async (req: Request, res: Response) => {
       .input('endTime', sql.DateTime2, new Date(endTime))
       .input('bookingCategory', sql.NVarChar, bookingCategory || 'General')
       .input('isPriority', sql.Bit, isPriority || false)
+      .input('initialStatus', sql.NVarChar, initialStatus)
       .query(`
         INSERT INTO dbo.Bookings (
           ResourceID, AdminID, RequestedByName, RequestedByEmail,
@@ -294,7 +350,7 @@ router.post('/bookings', async (req: Request, res: Response) => {
           BookingCategory, IsPriority, CreatedAt, LastModifiedAt
         ) VALUES (
           @resourceId, @adminId, @requestedByName, @requestedByEmail,
-          @eventTitle, @startTime, @endTime, 'Pending',
+          @eventTitle, @startTime, @endTime, @initialStatus,
           @bookingCategory, @isPriority, GETDATE(), GETDATE()
         );
       `);

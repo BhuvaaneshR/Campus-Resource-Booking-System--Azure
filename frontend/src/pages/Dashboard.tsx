@@ -10,6 +10,7 @@ import {
   Chip,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   ListItemSecondaryAction,
   IconButton,
@@ -220,11 +221,13 @@ const Dashboard: React.FC = () => {
                     ) : (
                       <List>
                         {filteredBookings.slice(0, 6).map(b => (
-                          <ListItem key={`b-${b.id}`} divider button onClick={() => navigate(`/booking/${b.id}`)}>
-                            <ListItemText
-                              primary={b.eventName}
-                              secondary={`${moment(b.startDateTime).format('MMM DD, h:mm A')} • ${b.resourceName}`}
-                            />
+                          <ListItem key={`b-${b.id}`} divider disablePadding>
+                            <ListItemButton onClick={() => navigate(`/booking/${b.id}`)}>
+                              <ListItemText
+                                primary={b.eventName}
+                                secondary={`${moment(b.startDateTime).format('MMM DD, h:mm A')} • ${b.resourceName}`}
+                              />
+                            </ListItemButton>
                           </ListItem>
                         ))}
                       </List>

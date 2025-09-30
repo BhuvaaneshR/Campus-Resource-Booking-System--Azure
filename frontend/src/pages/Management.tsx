@@ -148,7 +148,7 @@ const Management: React.FC = () => {
     if (!deleteDialog.booking) return;
 
     try {
-      await api.delete(`/bookings/${deleteDialog.booking.id}`);
+      await api.delete(`/campus/bookings/${deleteDialog.booking.id}`);
       setBookings(bookings.filter(b => b.id !== deleteDialog.booking!.id));
       setDeleteDialog({ open: false, booking: null });
     } catch (error) {
