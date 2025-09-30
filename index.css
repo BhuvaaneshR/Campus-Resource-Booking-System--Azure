@@ -1,0 +1,98 @@
+:root {
+  --color-primary: #ffffff;
+  --color-primary-contrast: #ffffff;
+  --color-secondary: #b388ff;
+  --color-bg: #faf7ff;
+  --color-surface: #ffffff;                                                      
+  --color-text: #1a1333;
+  --color-muted: #d3cfe0;
+  --shadow-soft: 0 10px 30px rgba(124, 77, 255, 0.15);
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-primary: #333352;
+    --color-primary-contrast: #d8caff;
+    --color-secondary: #7c4dff;
+    --color-bg: #ffffff;
+    --color-surface: #ffffff;
+    --color-text: #000000;
+    --color-muted: #a99bd6;
+    --shadow-soft: 0 10px 30px rgba(255, 255, 255, 0.6);
+  }
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-bg, #faf7ff);
+  color: var(--color-text, #1a1333);
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Light, clean UI polish (no logic changes) */
+.MuiAppBar-root {
+  background-color: var(--color-surface, #ffffff);
+  color: var(--color-text, #1f1f1f);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s ease;
+}
+
+.MuiDrawer-paper {
+  background-color: var(--color-surface, #ffffff);
+  border-right: 1px solid #f0f0f0;
+}
+
+.MuiPaper-root.MuiCard-root {
+  background-color: var(--color-surface, #ffffff);
+  border-radius: 12px !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.06) !important;
+  transition: all 0.3s ease;
+}
+
+.MuiPaper-root.MuiCard-root:hover {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08) !important;
+}
+
+.MuiPaper-root.MuiPaper-outlined {
+  border-color: #eaeaea !important;
+  border-radius: 10px !important;
+  background-color: var(--color-surface, #ffffff);
+}
+
+.MuiOutlinedInput-notchedOutline {
+  border-color: #dddddd !important;
+  transition: all 0.3s ease;
+}
+
+.MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline {
+  border-color: #c7c7c7 !important;
+}
+
+.MuiTableHead-root .MuiTableCell-head {
+  background-color: #fafafa;
+  font-weight: 700;
+}
+
+.MuiPagination-ul li button.Mui-selected {
+  background-color: #6c63ff !important;
+  color: #ffffff !important;
+}
+
+.MuiChip-root {
+  border-radius: 999px !important;
+  transition: all 0.3s ease;
+}
+
+/* Removed purple gradients and effects to keep a clean light palette */
