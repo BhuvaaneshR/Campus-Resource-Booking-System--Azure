@@ -33,6 +33,8 @@ import {
   Search,
   Edit,
   Delete,
+  CheckCircle,
+  Cancel,
   Add,
   LocationOn,
   People,
@@ -78,6 +80,13 @@ const Management: React.FC = () => {
   
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
+
+  const [statusDialog, setStatusDialog] = useState<{ open: boolean; booking: Booking | null; action: 'Confirm' | 'Denied' | null; reason: string }>({
+    open: false,
+    booking: null,
+    action: null,
+    reason: '',
+  });
 
   const fetchBookings = async () => {
     try {
@@ -151,8 +160,12 @@ const Management: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Confirmed': return 'success';
-      case 'Pending': return 'warning';
+      case 'Pending':
+      case 'Pending Approval': return 'warning';
       case 'Cancelled': return 'error';
+      case 'Denied': return 'error';
+      case 'Completed': return 'success';
+      case 'Cancelled - Overridden': return 'error';
       default: return 'default';
     }
   };
@@ -178,6 +191,32 @@ const Management: React.FC = () => {
       </Box>
     );
   }
+
+  const openConfirmDialog = (booking: Booking) => {
+    setStatusDialog({ open: true, booking, action: 'Confirm', reason: '' });
+  };
+
+  const openRejectDialog = (booking: Booking) => {
+    setStatusDialog({ open: true, booking, action: 'Denied', reason: '' });
+  };
+
+  const handleStatusSubmit = async () => {
+    if (!statusDialog.booking || !statusDialog.action) return;
+    try {
+      const bookingId = statusDialog.booking.id;
+      const newStatus = statusDialog.action === 'Confirm' ? 'Confirmed' : 'Denied';
+      const payload: any = { status: newStatus };
+      if (newStatus === 'Denied') {
+        payload.denialReason = statusDialog.reason || 'No reason specified';
+      }
+      await api.put(`/campus/bookings/${bookingId}/status`, payload);
+      // Update UI list locally
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: newStatus } : b));
+      setStatusDialog({ open: false, booking: null, action: null, reason: '' });
+    } catch (err) {
+      setError('Failed to update booking status');
+    }
+  };
 
   return (
     <Box>
@@ -330,6 +369,24 @@ const Management: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell>
+                    {(['Pending', 'Pending Approval'].includes(booking.status)) && (
+                      <>
+                        <IconButton
+                          size="small"
+                          onClick={() => openConfirmDialog(booking)}
+                          color="success"
+                        >
+                          <CheckCircle />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => openRejectDialog(booking)}
+                          color="error"
+                        >
+                          <Cancel />
+                        </IconButton>
+                      </>
+                    )}
                       <IconButton
                         size="small"
                         onClick={() => navigate(`/booking/${booking.id}`)}
@@ -394,6 +451,41 @@ const Management: React.FC = () => {
           </Button>
           <Button onClick={handleDeleteConfirm} color="error" variant="contained">
             Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Accept / Reject Dialog */}
+      <Dialog
+        open={statusDialog.open}
+        onClose={() => setStatusDialog({ open: false, booking: null, action: null, reason: '' })}
+      >
+        <DialogTitle>
+          {statusDialog.action === 'Confirm' ? 'Confirm Booking' : 'Reject Booking'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            {statusDialog.action === 'Confirm'
+              ? `Are you sure you want to confirm "${statusDialog.booking?.eventName}"?`
+              : `Provide a reason (optional) for rejecting "${statusDialog.booking?.eventName}".`}
+          </Typography>
+          {statusDialog.action === 'Denied' && (
+            <TextField
+              fullWidth
+              multiline
+              minRows={3}
+              placeholder="Reason for rejection"
+              value={statusDialog.reason}
+              onChange={(e) => setStatusDialog(prev => ({ ...prev, reason: e.target.value }))}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStatusDialog({ open: false, booking: null, action: null, reason: '' })}>
+            Cancel
+          </Button>
+          <Button onClick={handleStatusSubmit} variant="contained" color={statusDialog.action === 'Confirm' ? 'success' as any : 'error' as any}>
+            {statusDialog.action === 'Confirm' ? 'Confirm' : 'Reject'}
           </Button>
         </DialogActions>
       </Dialog>
