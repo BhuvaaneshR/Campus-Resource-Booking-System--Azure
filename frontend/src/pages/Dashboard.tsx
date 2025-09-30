@@ -15,6 +15,13 @@ import {
   IconButton,
   Alert,
   CircularProgress,
+  TextField,
+  InputAdornment,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
 } from '@mui/material';
 import {
   Add,
@@ -23,6 +30,7 @@ import {
   LocationOn,
   Edit,
   Delete,
+  Search,
 } from '@mui/icons-material';
 import { Calendar, momentLocalizer } from 'react-big-calendar';
 import moment from 'moment';
@@ -49,11 +57,15 @@ interface Booking {
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [resources, setResources] = useState<{ id: number; name: string; type: string; location: string; capacity: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     fetchBookings();
+    fetchResources();
   }, []);
 
   const fetchBookings = async () => {
@@ -65,6 +77,15 @@ const Dashboard: React.FC = () => {
       console.error('Error fetching bookings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchResources = async () => {
+    try {
+      const response = await api.get('/campus/resources');
+      setResources(response.data.data || []);
+    } catch (error) {
+      // Non-blocking
     }
   };
 
@@ -102,6 +123,34 @@ const Dashboard: React.FC = () => {
     .sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime())
     .slice(0, 5);
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredBookings = normalizedQuery
+    ? bookings.filter(b =>
+        b.eventName.toLowerCase().includes(normalizedQuery) ||
+        b.resourceName.toLowerCase().includes(normalizedQuery) ||
+        b.location.toLowerCase().includes(normalizedQuery)
+      )
+    : [];
+  const filteredResources = normalizedQuery
+    ? resources.filter(r =>
+        r.name.toLowerCase().includes(normalizedQuery) ||
+        (r.location || '').toLowerCase().includes(normalizedQuery) ||
+        (r.type || '').toLowerCase().includes(normalizedQuery)
+      )
+    : [];
+
+  const announcements = bookings
+    .slice()
+    .sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime())
+    .slice(0, 8)
+    .map(b => ({
+      id: b.id,
+      title: b.eventName,
+      when: `${moment(b.startDateTime).format('MMM DD')} • ${moment(b.startDateTime).format('h:mm A')}`,
+      venue: b.resourceName,
+      status: b.status,
+    }));
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -131,16 +180,77 @@ const Dashboard: React.FC = () => {
                     Manage campus resource bookings and view calendar
                   </Typography>
                 </Box>
-                <Button
-                  variant="contained"
-                  size="large"
-                  startIcon={<Add />}
-                  onClick={() => navigate('/booking')}
-                  sx={{ minWidth: 200 }}
-                >
-                  Book a Resource
-                </Button>
+                <Box display="flex" gap={2} alignItems="center">
+                  <TextField
+                    size="small"
+                    placeholder="Search events or venues..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setSearchOpen(e.target.value.trim().length > 0);
+                    }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Search />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{ width: { xs: '100%', sm: 320 } }}
+                  />
+                  <Button
+                    variant="contained"
+                    size="large"
+                    startIcon={<Add />}
+                    onClick={() => navigate('/booking')}
+                    sx={{ minWidth: 200 }}
+                  >
+                    Book a Resource
+                  </Button>
+                </Box>
               </Box>
+              {searchOpen && (filteredBookings.length > 0 || filteredResources.length > 0) && (
+                <Box mt={2} display="grid" gap={2} gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }}>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Matching Events
+                    </Typography>
+                    {filteredBookings.length === 0 ? (
+                      <Typography color="text.secondary">No events found</Typography>
+                    ) : (
+                      <List>
+                        {filteredBookings.slice(0, 6).map(b => (
+                          <ListItem key={`b-${b.id}`} divider button onClick={() => navigate(`/booking/${b.id}`)}>
+                            <ListItemText
+                              primary={b.eventName}
+                              secondary={`${moment(b.startDateTime).format('MMM DD, h:mm A')} • ${b.resourceName}`}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Matching Venues
+                    </Typography>
+                    {filteredResources.length === 0 ? (
+                      <Typography color="text.secondary">No venues found</Typography>
+                    ) : (
+                      <List>
+                        {filteredResources.slice(0, 6).map(r => (
+                          <ListItem key={`r-${r.id}`} divider>
+                            <ListItemText
+                              primary={r.name}
+                              secondary={`${r.type}${r.location ? ' • ' + r.location : ''}`}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Paper>
+                </Box>
+              )}
             </CardContent>
           </Card>
 
@@ -221,6 +331,41 @@ const Dashboard: React.FC = () => {
                     </ListItem>
                   ))}
                 </List>
+              )}
+            </CardContent>
+          </Card>
+          <Card sx={{ minWidth: { md: 360 } }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Announcements
+              </Typography>
+              {announcements.length === 0 ? (
+                <Typography color="text.secondary">No announcements yet</Typography>
+              ) : (
+                <Paper variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Event</TableCell>
+                        <TableCell>When</TableCell>
+                        <TableCell>Venue</TableCell>
+                        <TableCell>Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {announcements.map(a => (
+                        <TableRow key={a.id} hover onClick={() => navigate(`/booking/${a.id}`)} style={{ cursor: 'pointer' }}>
+                          <TableCell>{a.title}</TableCell>
+                          <TableCell>{a.when}</TableCell>
+                          <TableCell>{a.venue}</TableCell>
+                          <TableCell>
+                            <Chip size="small" label={a.status} color={getStatusColor(a.status) as any} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Paper>
               )}
             </CardContent>
           </Card>
