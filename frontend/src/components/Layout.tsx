@@ -65,16 +65,38 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const handleSearch = (event: React.FormEvent) => {
     event.preventDefault();
-    if (searchQuery.trim()) {
+    if (!searchQuery.trim()) return;
+    if (user?.role === 'Portal Admin') {
       navigate(`/admin/management?search=${encodeURIComponent(searchQuery.trim())}`);
+    } else {
+      // For non-admin personas, route to their dashboard search or ignore
+      navigate(`/${user?.role === 'Faculty' ? 'faculty' : 'student'}/dashboard`);
     }
   };
 
-  const menuItems = [
-    { text: 'Dashboard', icon: <Dashboard />, path: '/admin/dashboard' },
-    { text: 'Book a Resource', icon: <Add />, path: '/admin/booking' },
-    { text: 'Manage Bookings', icon: <ManageAccounts />, path: '/admin/management' },
-  ];
+  // Role-aware menu
+  const menuItems = React.useMemo(() => {
+    if (user?.role === 'Portal Admin') {
+      return [
+        { text: 'Dashboard', icon: <Dashboard />, path: '/admin/dashboard' },
+        { text: 'Book a Resource', icon: <Add />, path: '/admin/booking' },
+        { text: 'Manage Bookings', icon: <ManageAccounts />, path: '/admin/management' },
+      ];
+    }
+    if (user?.role === 'Faculty') {
+      return [
+        { text: 'Dashboard', icon: <Dashboard />, path: '/faculty/dashboard' },
+        { text: 'Request Booking', icon: <Add />, path: '/faculty/booking-request' },
+        { text: 'My Bookings', icon: <ManageAccounts />, path: '/faculty/my-bookings' },
+      ];
+    }
+    // Student Coordinator
+    return [
+      { text: 'Dashboard', icon: <Dashboard />, path: '/student/dashboard' },
+      { text: 'Request Booking', icon: <Add />, path: '/student/booking' },
+      { text: 'Manage Requests', icon: <ManageAccounts />, path: '/student/manage-requests' },
+    ];
+  }, [user?.role]);
 
   const drawer = (
     <div>
@@ -124,7 +146,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </IconButton>
           
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            Portal Admin Dashboard
+            {user?.role === 'Portal Admin'
+              ? 'Portal Admin Dashboard'
+              : user?.role === 'Faculty'
+                ? 'Faculty Dashboard'
+                : 'Student Coordinator Dashboard'}
           </Typography>
 
           <Box component="form" onSubmit={handleSearch} sx={{ mr: 2 }}>
@@ -242,18 +268,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </Typography>
         </MenuItem>
         <Divider />
+        {user?.role === 'Portal Admin' && (
         <MenuItem onClick={() => { navigate('/admin/requests'); handleMenuClose(); }}>
           <ListItemIcon>
             <ManageAccounts fontSize="small" />
           </ListItemIcon>
           Profile Creation Requests
         </MenuItem>
+        )}
+        {user?.role === 'Portal Admin' && (
         <MenuItem onClick={() => { navigate('/admin/booking-requests'); handleMenuClose(); }}>
           <ListItemIcon>
             <ManageAccounts fontSize="small" />
           </ListItemIcon>
           Resource Booking Requests
         </MenuItem>
+        )}
         <MenuItem onClick={handleMenuClose}>
           <ListItemIcon>
             <AccountCircle fontSize="small" />

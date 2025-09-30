@@ -189,7 +189,8 @@ const BookingForm: React.FC = () => {
           isPriority: false
         };
         await api.post('/campus/bookings', campusBookingData);
-        setSuccess(user?.role === 'Faculty' ? 'Request submitted successfully! Awaiting admin approval.' : 'Booking created successfully!');
+        const isRequester = user?.role === 'Faculty' || user?.role === 'Student Coordinator';
+        setSuccess(isRequester ? 'Request submitted successfully! Awaiting admin approval.' : 'Booking created successfully!');
       }
 
       setTimeout(() => {
@@ -230,13 +231,17 @@ const BookingForm: React.FC = () => {
         <Card>
           <CardContent>
             <Typography variant="h5" gutterBottom>
-              {isEdit ? 'Edit Booking' : 'Book a Resource'}
+              {isEdit
+                ? 'Edit Booking'
+                : ((user?.role === 'Faculty' || user?.role === 'Student Coordinator')
+                    ? 'Request a Resource'
+                    : 'Book a Resource')}
             </Typography>
             
             {error && (
               <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
                 {error}
-              </Alert>
+            </Alert>
             )}
 
             {success && (
@@ -357,7 +362,9 @@ const BookingForm: React.FC = () => {
                         ? 'Saving...'
                         : (isEdit
                             ? 'Update Booking'
-                            : (user?.role === 'Faculty' ? 'Request Resource' : 'Create Booking'))}
+                            : ((user?.role === 'Faculty' || user?.role === 'Student Coordinator')
+                                ? 'Request Resource'
+                                : 'Create Booking'))}
                     </Button>
                   </Box>
               </Box>

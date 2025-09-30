@@ -29,8 +29,17 @@ router.get('/test', async (req: Request, res: Response) => {
       message: 'Database connection successful',
       data: result.recordset
     });
+  } catch (error) {
+    console.error('Database test failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Database connection failed',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
 
-// Delete a booking by ID (hard delete; if constrained, fall back to set Cancelled)
+// Delete a booking by ID (hard delete; if constrained, fall back to Cancelled)
 router.delete('/bookings/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
@@ -54,7 +63,7 @@ router.delete('/bookings/:id', async (req: Request, res: Response) => {
     // Fallback: set status to Cancelled
     await pool.request()
       .input('id', sql.Int, id)
-      .query(`UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id`);
+      .query("UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id");
 
     return res.json({ success: true, message: 'Booking cancelled (could not hard delete due to constraints)' });
   } catch (error) {
@@ -64,20 +73,11 @@ router.delete('/bookings/:id', async (req: Request, res: Response) => {
       const pool = await connectToDatabase();
       await pool.request()
         .input('id', sql.Int, id)
-        .query(`UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id`);
+        .query("UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id");
       return res.json({ success: true, message: 'Booking cancelled (delete failed)' });
     } catch (err2) {
       return res.status(500).json({ success: false, error: 'Failed to delete or cancel booking', details: error instanceof Error ? error.message : String(error) });
     }
-  }
-});
-  } catch (error) {
-    console.error('Database test failed:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Database connection failed',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
   }
 });
 

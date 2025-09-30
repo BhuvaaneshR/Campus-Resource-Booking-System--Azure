@@ -35,29 +35,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles 
 
   // Check role-based access if allowedRoles is specified
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    return (
-      <Box
-        display="flex"
-        flexDirection="column"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="100vh"
-        p={3}
-      >
-        <Typography variant="h4" color="error" gutterBottom align="center">
-          Access Denied
-        </Typography>
-        <Typography variant="h6" align="center" gutterBottom>
-          You don't have permission to access this section.
-        </Typography>
-        <Typography variant="body1" color="textSecondary" align="center">
-          Current role: {user.role}
-        </Typography>
-        <Typography variant="body2" color="textSecondary" align="center" sx={{ mt: 1 }}>
-          Please contact the system administrator if you believe this is an error.
-        </Typography>
-      </Box>
-    );
+    // Gracefully redirect to the proper dashboard for the current role
+    const to = user.role === 'Portal Admin'
+      ? '/admin/dashboard'
+      : user.role === 'Faculty'
+        ? '/faculty/dashboard'
+        : '/student/dashboard';
+    return <Navigate to={to} replace />;
   }
 
   return <>{children}</>;

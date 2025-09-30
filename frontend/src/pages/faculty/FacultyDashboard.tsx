@@ -73,14 +73,48 @@ const FacultyDashboard: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // Fetch all confirmed bookings for calendar view
-      const bookingsResponse = await api.get('/api/bookings');
-      
-      // Fetch available resources
-      const resourcesResponse = await api.get('/api/resources');
-      
-      setBookings(bookingsResponse.data.bookings || []);
-      setResources(resourcesResponse.data.resources || []);
+      // Fetch bookings and resources from campus endpoints
+      const bookingsResponse = await api.get('/campus/bookings');
+      const resourcesResponse = await api.get('/campus/resources');
+
+      const rows = (bookingsResponse.data?.data || []) as Array<any>;
+      const mapped: Booking[] = rows.map((r) => {
+        const start = new Date(r.startDateTime);
+        const end = new Date(r.endDateTime);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const dateStr = (d: Date) => d.toISOString().slice(0, 10);
+        const timeStr = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+        // Normalize statuses to legacy labels used in this component
+        const statusNorm = r.status === 'Denied'
+          ? 'Rejected'
+          : r.status === 'Pending'
+            ? 'Pending Approval'
+            : r.status;
+        return {
+          id: String(r.id),
+          eventName: r.eventName,
+          resourceName: r.resourceName,
+          location: r.location,
+          startDate: dateStr(start),
+          endDate: dateStr(end),
+          startTime: timeStr(start),
+          endTime: timeStr(end),
+          status: statusNorm as Booking['status'],
+          requesterName: r.inchargeName,
+          requesterEmail: r.inchargeEmail,
+        };
+      });
+      setBookings(mapped);
+
+      const resRows = (resourcesResponse.data?.data || []) as Array<any>;
+      const mappedResources: Resource[] = resRows.map((r) => ({
+        id: String(r.id),
+        name: r.name,
+        location: r.location,
+        capacity: r.capacity,
+        type: r.type,
+      }));
+      setResources(mappedResources);
       
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
@@ -147,7 +181,7 @@ const FacultyDashboard: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4" component="h1">
-          Faculty Dashboard
+          {user?.role === 'Student Coordinator' ? 'Student Coordinator Dashboard' : 'Faculty Dashboard'}
         </Typography>
         <Box display="flex" gap={2} alignItems="center">
           <FormControl size="small" sx={{ minWidth: 150 }}>

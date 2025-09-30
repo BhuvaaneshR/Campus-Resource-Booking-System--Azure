@@ -148,11 +148,13 @@ const Management: React.FC = () => {
     if (!deleteDialog.booking) return;
 
     try {
-      await api.delete(`/campus/bookings/${deleteDialog.booking.id}`);
-      setBookings(bookings.filter(b => b.id !== deleteDialog.booking!.id));
+      const res = await api.delete(`/campus/bookings/${deleteDialog.booking.id}`);
+      // Remove from local state to immediately reflect UI
+      setBookings(prev => prev.filter(b => b.id !== deleteDialog.booking!.id));
       setDeleteDialog({ open: false, booking: null });
     } catch (error) {
-      setError('Failed to delete booking');
+      const msg = (error as any)?.response?.data?.error || 'Failed to delete booking';
+      setError(msg);
       console.error('Error deleting booking:', error);
     }
   };

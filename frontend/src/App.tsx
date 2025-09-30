@@ -15,6 +15,7 @@ import BookingForm from './pages/BookingForm';
 import Management from './pages/Management';
 import FacultyDashboard from './pages/faculty/FacultyDashboard';
 import MyBookings from './pages/faculty/MyBookings';
+import StudentManageRequests from './pages/student/ManageRequests';
 import './App.css';
 
 // Create Material-UI theme
@@ -122,8 +123,9 @@ function App() {
                     <Layout>
                       <Routes>
                         <Route path="/" element={<Navigate to="/student/dashboard" replace />} />
-                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/dashboard" element={<FacultyDashboard />} />
                         <Route path="/booking" element={<BookingForm />} />
+                        <Route path="/manage-requests" element={<StudentManageRequests />} />
                         <Route path="/booking/:id" element={<BookingForm />} />
                       </Routes>
                     </Layout>
