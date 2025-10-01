@@ -18,14 +18,18 @@ import { connectToDatabase, getPool } from './config/database';
 dotenv.config();
 
 const app = express();
-const PORT = parseInt(process.env.PORT || process.env.WEBSITES_PORT || '8080', 10);
+const PORT = parseInt(process.env.PORT || '8080', 10);
 
-// Security middleware
-app.use(helmet());
+// --- CHANGED CORS CONFIGURATION ---
+// Define allowed origins in an array for clarity
+// --- CORS CONFIGURATION ---
+const allowedOrigins: string[] = [
+  'http://localhost:3000',
+  process.env.AZURE_APP_SERVICE_URL,
+].filter((origin): origin is string => Boolean(origin)); // Type-safe filter
+
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.AZURE_APP_SERVICE_URL 
-    : 'http://localhost:3000',
+  origin: allowedOrigins,
   credentials: true
 }));
 
@@ -51,12 +55,12 @@ app.get('/health', async (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/profile-auth', profileAuthRoutes); // Profile-based authentication
+app.use('/api/profile-auth', profileAuthRoutes);
 app.use('/api/bookings', authenticateToken, bookingRoutes);
 app.use('/api/resources', authenticateToken, resourceRoutes);
-app.use('/api/db', databaseRoutes); // Direct database access routes
-app.use('/api/campus', campusDbRoutes); // Campus database routes for existing schema
-app.use('/api/profile-requests', profileRequestRoutes); // Public submit; admin ops protected per-route
+app.use('/api/db', databaseRoutes);
+app.use('/api/campus', campusDbRoutes);
+app.use('/api/profile-requests', profileRequestRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -69,29 +73,23 @@ app.use('*', (req, res) => {
   });
 });
 
-// Initialize server (non-blocking database connection)
+// --- CHANGED SERVER STARTUP LOGIC ---
 async function startServer() {
   try {
-    // Start server immediately - don't wait for database
+    // 1. Connect to the database first. The app will not start if this fails.
+    await connectToDatabase();
+    console.log('🔗 Database connected successfully');
+
+    // 2. Only start the server after a successful database connection.
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Environment: ${process.env.NODE_ENV}`);
       console.log(`🔗 Health check: http://localhost:${PORT}/health`);
       console.log('✅ Application started successfully!');
     });
-
-    // Connect to database in background (non-blocking)
-    connectToDatabase()
-      .then(() => {
-        console.log('🔗 Database connected successfully');
-      })
-      .catch((error) => {
-        console.error('❌ Database connection failed (app still running):', error);
-      });
-    
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
+    console.error('❌ Failed to start server due to database connection error:', error);
+    process.exit(1); // Exit with an error code to make failures obvious in Azure
   }
 }
 
