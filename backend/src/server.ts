@@ -20,14 +20,19 @@ dotenv.config();
 const app = express();
 const PORT = parseInt(process.env.PORT || '8080', 10);
 
-// --- CHANGED CORS CONFIGURATION ---
-// Define allowed origins in an array for clarity
 // --- CORS CONFIGURATION ---
 const allowedOrigins: string[] = [
-  'http://localhost:3000',
-  process.env.AZURE_APP_SERVICE_URL,
-].filter((origin): origin is string => Boolean(origin)); // Type-safe filter
+  'http://localhost:3000',  // For local development
+  'https://campus-booking-frontend-web.azurewebsites.net'  // For Azure production
+];
 
+// Add additional origin from env if present
+if (process.env.AZURE_APP_SERVICE_URL) {
+  allowedOrigins.push(process.env.AZURE_APP_SERVICE_URL);
+}
+
+// Security middleware
+app.use(helmet());
 app.use(cors({
   origin: allowedOrigins,
   credentials: true
@@ -73,23 +78,24 @@ app.use('*', (req, res) => {
   });
 });
 
-// --- CHANGED SERVER STARTUP LOGIC ---
+// --- SERVER STARTUP LOGIC ---
 async function startServer() {
   try {
-    // 1. Connect to the database first. The app will not start if this fails.
+    // Connect to the database first
     await connectToDatabase();
     console.log('🔗 Database connected successfully');
 
-    // 2. Only start the server after a successful database connection.
+    // Start the server after successful database connection
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Environment: ${process.env.NODE_ENV}`);
       console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+      console.log(`✅ Allowed origins: ${allowedOrigins.join(', ')}`);
       console.log('✅ Application started successfully!');
     });
   } catch (error) {
     console.error('❌ Failed to start server due to database connection error:', error);
-    process.exit(1); // Exit with an error code to make failures obvious in Azure
+    process.exit(1);
   }
 }
 
