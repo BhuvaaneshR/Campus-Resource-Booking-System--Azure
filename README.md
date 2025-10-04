@@ -243,15 +243,4 @@ The system uses SQL Server with the following main tables:
 - Booking reminder workflows
 - Integration with Office 365
 
-## 📝 License
-
-This project is part of a Cloud Computing course and is for educational purposes.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
 
