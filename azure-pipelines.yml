@@ -1,45 +1,103 @@
-# azure-pipelines.yml
-
 trigger:
-- main
-
-pool:
-  vmImage: 'ubuntu-latest'
+  branches:
+    include:
+      - main
 
 variables:
-  # Define the production backend URL for the frontend build
-  REACT_APP_API_URL: 'https://campus-booking-backend-api.azurewebsites.net/api'
+  acrName: 'campusbookingacr'
+  resourceGroup: 'campus-booking-rg'
+  backendApp: 'campus-booking-backend-api'
+  frontendApp: 'campus-booking-frontend-web'
+  backendUrl: 'https://campus-booking-backend-api.azurewebsites.net'
 
-steps:
-# ========== BUILD BACKEND ==========
-- task: NodeTool@0
-  inputs:
-    versionSpec: '20.x'
-  displayName: 'Install Node.js'
+stages:
+  # BUILD STAGE
+  - stage: Build
+    displayName: 'Build and Push Images'
+    jobs:
+      - job: BuildBackend
+        displayName: 'Build Backend'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: Docker@2
+            displayName: 'Build Backend Image'
+            inputs:
+              containerRegistry: 'campusbookingacr-connection'
+              repository: 'backend'
+              command: 'build'
+              Dockerfile: 'backend/Dockerfile'
+              tags: '$(Build.BuildId)'
+          
+          - task: Docker@2
+            displayName: 'Push Backend Image'
+            inputs:
+              containerRegistry: 'campusbookingacr-connection'
+              repository: 'backend'
+              command: 'push'
+              tags: '$(Build.BuildId)'
 
-- script: |
-    npm install
-    npm run build --if-present
-  displayName: 'Build Backend'
-  workingDirectory: 'backend'
+      - job: BuildFrontend
+        displayName: 'Build Frontend'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - script: |
+              cd frontend
+              echo "REACT_APP_API_URL=$(backendUrl)" > .env.production
+            displayName: 'Create Frontend .env.production'
+          
+          - task: Docker@2
+            displayName: 'Build Frontend Image'
+            inputs:
+              containerRegistry: 'campusbookingacr-connection'
+              repository: 'frontend'
+              command: 'build'
+              Dockerfile: 'frontend/Dockerfile'
+              tags: '$(Build.BuildId)'
+          
+          - task: Docker@2
+            displayName: 'Push Frontend Image'
+            inputs:
+              containerRegistry: 'campusbookingacr-connection'
+              repository: 'frontend'
+              command: 'push'
+              tags: '$(Build.BuildId)'
 
-- task: PublishPipelineArtifact@1
-  inputs:
-    targetPath: 'backend'
-    artifactName: 'backend-app'
-  displayName: 'Publish Backend Artifact'
+  # DEPLOY STAGE
+  - stage: Deploy
+    displayName: 'Deploy to Azure'
+    dependsOn: Build
+    jobs:
+      - deployment: DeployBackend
+        displayName: 'Deploy Backend'
+        environment: 'production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebAppContainer@1
+                  displayName: 'Deploy Backend Container'
+                  inputs:
+                    azureSubscription: 'azure-students-connection'
+                    appName: '$(backendApp)'
+                    containers: '$(acrName).azurecr.io/backend:$(Build.BuildId)'
 
-# ========== BUILD FRONTEND ==========
-- script: |
-    # Create a .env file with the production URL from the pipeline variables
-    echo "REACT_APP_API_URL=$(REACT_APP_API_URL)" > .env
-    npm install
-    npm run build
-  displayName: 'Build Frontend'
-  workingDirectory: 'frontend'
-
-- task: PublishPipelineArtifact@1
-  inputs:
-    targetPath: 'frontend/build'
-    artifactName: 'frontend-app'
-  displayName: 'Publish Frontend Artifact'
+      - deployment: DeployFrontend
+        displayName: 'Deploy Frontend'
+        environment: 'production'
+        dependsOn: DeployBackend
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebAppContainer@1
+                  displayName: 'Deploy Frontend Container'
+                  inputs:
+                    azureSubscription: 'azure-students-connection'
+                    appName: '$(frontendApp)'
+                    containers: '$(acrName).azurecr.io/frontend:$(Build.BuildId)'
