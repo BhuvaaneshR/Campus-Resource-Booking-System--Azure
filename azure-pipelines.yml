@@ -4,75 +4,80 @@ trigger:
       - main
 
 variables:
+  # Names of your Azure resources
   acrName: 'campusbookingacr'
-  resourceGroup: 'campusbookingrg'
-  backendApp: 'campus-booking-backend-api'
-  frontendApp: 'campus-booking-frontend-web'
-  backendUrl: 'https://campus-booking-backend-api.azurewebsites.net'
+  backendAppName: 'campus-booking-backend-api'
+  frontendAppName: 'campus-booking-frontend-web'
+  
+  # URL used to build the frontend
+  backendUrl: 'https://campus-booking-backend-api.azurewebsites.net/api'
+  
+  # Name of your Azure subscription service connection
+  azureSubscription: 'azure-students-connection' 
 
 stages:
-  # BUILD STAGE
-  - stage: Build
-    displayName: 'Build and Push Images'
-    jobs:
-      - job: BuildBackend
-        displayName: 'Build Backend'
-        pool:
-          vmImage: 'ubuntu-latest'
-        steps:
-          - script: |
-              cd backend
-              echo "Building backend..."
-            displayName: 'Navigate to Backend'
-          
-          - task: Docker@2
-            displayName: 'Build Backend Image'
-            inputs:
-              containerRegistry: 'campusbookingacr-connection'
-              repository: 'backend'
-              command: 'build'
-              Dockerfile: 'backend/Dockerfile'
-              tags: '$(Build.BuildId)'
-          
-          - task: Docker@2
-            displayName: 'Push Backend Image'
-            inputs:
-              containerRegistry: 'campusbookingacr-connection'
-              repository: 'backend'
-              command: 'push'
-              tags: '$(Build.BuildId)'
+# ========== BUILD STAGE ==========
+- stage: Build
+  displayName: 'Build and Push Images'
+  jobs:
+  - job: BuildAndPush
+    displayName: 'Build and Push to ACR'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    
+    # Build and Push Backend Image
+    - task: Docker@2
+      displayName: 'Build and Push Backend'
+      inputs:
+        containerRegistry: 'campusbookingacr-connection' # Your ACR service connection
+        repository: 'backend'
+        command: 'buildAndPush'
+        Dockerfile: 'backend/Dockerfile'
+        tags: '$(Build.BuildId)'
 
-      - job: BuildFrontend
-        displayName: 'Build Frontend'
-        pool:
-          vmImage: 'ubuntu-latest'
-        steps:
-          - script: |
-              cd frontend
-              echo "REACT_APP_API_URL=$(backendUrl)" > .env.production
-              cat .env.production
-            displayName: 'Create Frontend .env.production'
-          
-          - task: Docker@2
-            displayName: 'Build Frontend Image'
-            inputs:
-              containerRegistry: 'campusbookingacr-connection'
-              repository: 'frontend'
-              command: 'build'
-              Dockerfile: 'frontend/Dockerfile'
-              tags: '$(Build.BuildId)'
-          
-          - task: Docker@2
-            displayName: 'Push Frontend Image'
-            inputs:
-              containerRegistry: 'campusbookingacr-connection'
-              repository: 'frontend'
-              command: 'push'
-              tags: '$(Build.BuildId)'
+    # Create .env file for Frontend build
+    - script: |
+        echo "REACT_APP_API_URL=$(backendUrl)" > frontend/.env.production
+      displayName: 'Create Frontend .env file'
 
-  # DEPLOY STAGE - COMMENTED OUT FOR TESTING
-  # - stage: Deploy
-  #   displayName: 'Deploy to Azure'
-  #   dependsOn: Build
-  #   jobs:
-  #     - deployment: DeployBackend
+    # Build and Push Frontend Image
+    - task: Docker@2
+      displayName: 'Build and Push Frontend'
+      inputs:
+        containerRegistry: 'campusbookingacr-connection' # Your ACR service connection
+        repository: 'frontend'
+        command: 'buildAndPush'
+        Dockerfile: 'frontend/Dockerfile'
+        buildContext: 'frontend' # Specify the folder for the build
+        tags: '$(Build.BuildId)'
+
+# ========== DEPLOY STAGE ==========
+- stage: Deploy
+  displayName: 'Deploy to App Services'
+  dependsOn: Build
+  jobs:
+  - deployment: DeployProduction
+    displayName: 'Deploy to Production'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production' # Targets the environment you just created
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          # Deploy Backend to its App Service
+          - task: AzureWebAppContainer@1
+            displayName: 'Deploy Backend App'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              appName: $(backendAppName)
+              containers: '$(acrName).azurecr.io/backend:$(Build.BuildId)'
+
+          # Deploy Frontend to its App Service
+          - task: AzureWebAppContainer@1
+            displayName: 'Deploy Frontend App'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              appName: $(frontendAppName)
+              containers: '$(acrName).azurecr.io/frontend:$(Build.BuildId)'
