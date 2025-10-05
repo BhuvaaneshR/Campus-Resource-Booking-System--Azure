@@ -82,6 +82,14 @@ stages:
               # For this project, we'll use the local state in the agent for simplicity.
 
           - task: TerraformTaskV4@4
+            displayName: 'Terraform Plan'
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
+              environmentServiceNameAzureRM: 'azure-students-connection'    
+
+          - task: TerraformTaskV4@4
             displayName: 'Terraform Apply'
             inputs:
               command: 'apply'
