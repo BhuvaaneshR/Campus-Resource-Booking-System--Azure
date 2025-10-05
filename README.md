@@ -243,4 +243,17 @@ The system uses SQL Server with the following main tables:
 - Booking reminder workflows
 - Integration with Office 365
 
+# Terraform Infrastructure
 
+## Resources Managed
+- Resource Group
+- Azure Container Registry
+- SQL Server & Database
+- App Service Plan
+- Backend & Frontend Web Apps
+
+## Usage
+```bash
+terraform init
+terraform plan
+terraform apply
