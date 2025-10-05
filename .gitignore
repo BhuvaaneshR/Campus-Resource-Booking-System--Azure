@@ -1,0 +1,27 @@
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Exclude all .tfvars files (may contain sensitive data)
+*.tfvars
+*.tfvars.json
+
+# Lock file
+.terraform.lock.hcl
+
+# Create/update .gitignore in terraform directory
+cd terraform
+echo .terraform/ >> .gitignore
+echo .terraform.lock.hcl >> .gitignore
+echo *.tfstate >> .gitignore
+echo *.tfstate.backup >> .gitignore
+
+# Go back to root
+cd ..
