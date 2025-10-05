@@ -78,8 +78,6 @@ stages:
             inputs:
               command: 'init'
               workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
-              backendServiceArm: $(azureSubscription)
-              backendAzureRmResourceGroupName: $(resourceGroup)
               # NOTE: You will need a Storage Account for Terraform state in a real pipeline
               # For this project, we'll use the local state in the agent for simplicity.
 
