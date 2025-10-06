@@ -53,51 +53,43 @@ stages:
         buildContext: 'frontend'
         tags: '$(Build.BuildId)'
 
-# ========== STAGE 2: DEPLOY INFRASTRUCTURE AND APPS ==========
+# ========== STAGE 2: TERRAFORM VALIDATION ==========
+- stage: TerraformValidate
+  displayName: 'Validate Terraform Configuration'
+  dependsOn: []  # Runs independently
+  jobs:
+  - job: Validate
+    displayName: 'Terraform Validation'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: TerraformInstaller@0
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: 'latest'
+    
+    - bash: |
+        cd terraform
+        terraform init -backend=false
+        terraform fmt -check
+        terraform validate
+        echo "✓ Terraform configuration is valid"
+      displayName: 'Validate Terraform Code'
+
+# ========== STAGE 3: DEPLOY APPS ==========
 - stage: Deploy
-  displayName: 'Deploy Infrastructure and Apps'
+  displayName: 'Deploy Applications'
   dependsOn: Build
   jobs:
   - deployment: DeployProduction
     displayName: 'Deploy to Production'
     pool:
       vmImage: 'ubuntu-latest'
-    environment: 'production' # Targets the environment you just created
+    environment: 'production'
     strategy:
       runOnce:
         deploy:
           steps:
-          # --- Terraform Infrastructure Steps ---
-          - task: TerraformInstaller@1
-            displayName: 'Install Terraform'
-            inputs:
-              terraformVersion: 'latest'
-
-          - task: TerraformTaskV4@4
-            displayName: 'Terraform Init'
-            inputs:
-              command: 'init'
-              workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
-              # NOTE: You will need a Storage Account for Terraform state in a real pipeline
-              # For this project, we'll use the local state in the agent for simplicity.
-
-          - task: TerraformTaskV4@4
-            displayName: 'Terraform Plan'
-            inputs:
-              provider: 'azurerm'
-              command: 'plan'
-              workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
-              environmentServiceNameAzureRM: 'azure-students-connection'    
-
-          - task: TerraformTaskV4@4
-            displayName: 'Terraform Apply'
-            inputs:
-              command: 'apply'
-              workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
-              environmentServiceNameAzureRM: $(azureSubscription)
-              commandOptions: '-auto-approve'
-
-          # --- Application Deployment Steps ---
           - task: AzureWebAppContainer@1
             displayName: 'Deploy Backend App'
             inputs:
