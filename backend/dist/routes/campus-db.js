@@ -1,0 +1,521 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.campusDbRoutes = void 0;
+const express_1 = require("express");
+const database_1 = require("../config/database");
+const mssql_1 = __importDefault(require("mssql"));
+const router = (0, express_1.Router)();
+exports.campusDbRoutes = router;
+// Test database connection
+router.get('/test', async (req, res) => {
+    try {
+        const pool = await (0, database_1.connectToDatabase)();
+        // Ensure Admins table exists (safety for first-time setups)
+        await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Admins' AND xtype='U')
+      BEGIN
+        CREATE TABLE dbo.Admins (
+          AdminID INT IDENTITY(1,1) PRIMARY KEY,
+          AdminName NVARCHAR(200) NOT NULL,
+          AdminEmail NVARCHAR(200) NOT NULL UNIQUE,
+          IsActive BIT NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IX_Admins_Email ON dbo.Admins(AdminEmail);
+      END
+    `);
+        const result = await pool.request().query('SELECT 1 as test');
+        res.json({
+            success: true,
+            message: 'Database connection successful',
+            data: result.recordset
+        });
+    }
+    catch (error) {
+        console.error('Database test failed:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Database connection failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+// Delete a booking by ID (hard delete; if constrained, fall back to Cancelled)
+router.delete('/bookings/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const pool = await (0, database_1.connectToDatabase)();
+        // Try hard delete first
+        const del = await pool.request()
+            .input('id', mssql_1.default.Int, id)
+            .query('DELETE FROM dbo.Bookings WHERE BookingID = @id');
+        if (del.rowsAffected && del.rowsAffected[0] > 0) {
+            return res.json({ success: true, message: 'Booking deleted' });
+        }
+        // If not found, return 404
+        const exists = await pool.request().input('id', mssql_1.default.Int, id).query('SELECT 1 FROM dbo.Bookings WHERE BookingID = @id');
+        if (exists.recordset.length === 0) {
+            return res.status(404).json({ success: false, error: 'Booking not found' });
+        }
+        // Fallback: set status to Cancelled
+        await pool.request()
+            .input('id', mssql_1.default.Int, id)
+            .query("UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id");
+        return res.json({ success: true, message: 'Booking cancelled (could not hard delete due to constraints)' });
+    }
+    catch (error) {
+        console.error('Error deleting booking:', error);
+        // Last resort fallback: try to cancel
+        try {
+            const pool = await (0, database_1.connectToDatabase)();
+            await pool.request()
+                .input('id', mssql_1.default.Int, id)
+                .query("UPDATE dbo.Bookings SET BookingStatus = 'Cancelled', LastModifiedAt = GETDATE() WHERE BookingID = @id");
+            return res.json({ success: true, message: 'Booking cancelled (delete failed)' });
+        }
+        catch (err2) {
+            return res.status(500).json({ success: false, error: 'Failed to delete or cancel booking', details: error instanceof Error ? error.message : String(error) });
+        }
+    }
+});
+// Get all resources
+router.get('/resources', async (req, res) => {
+    try {
+        const pool = await (0, database_1.connectToDatabase)();
+        const result = await pool.request().query(`
+      SELECT 
+        ResourceID as id,
+        ResourceName as name,
+        ResourceType as type,
+        Location as location,
+        Capacity as capacity,
+        IsActive as isActive
+      FROM dbo.Resources
+      WHERE IsActive = 1
+      ORDER BY ResourceName
+    `);
+        res.json({
+            success: true,
+            data: result.recordset,
+            count: result.recordset.length
+        });
+    }
+    catch (error) {
+        console.error('Error fetching resources:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch resources'
+        });
+    }
+});
+// Get all admins
+router.get('/admins', async (req, res) => {
+    try {
+        const pool = await (0, database_1.connectToDatabase)();
+        const result = await pool.request().query(`
+      SELECT 
+        AdminID as id,
+        AdminName as name,
+        AdminEmail as email,
+        IsActive as isActive
+      FROM dbo.Admins
+      WHERE IsActive = 1
+      ORDER BY AdminName
+    `);
+        res.json({
+            success: true,
+            data: result.recordset,
+            count: result.recordset.length
+        });
+    }
+    catch (error) {
+        console.error('Error fetching admins:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch admins'
+        });
+    }
+});
+// Get all bookings with resource and admin details
+router.get('/bookings', async (req, res) => {
+    try {
+        const { requestedByEmail } = req.query;
+        const pool = await (0, database_1.connectToDatabase)();
+        const request = pool.request();
+        let where = '';
+        if (requestedByEmail) {
+            request.input('requestedByEmail', mssql_1.default.NVarChar, String(requestedByEmail).trim().toLowerCase());
+            where = 'WHERE LOWER(b.RequestedByEmail) = @requestedByEmail';
+        }
+        const result = await request.query(`
+      SELECT 
+        b.BookingID as id,
+        b.EventTitle as eventName,
+        b.StartTime as startDateTime,
+        b.EndTime as endDateTime,
+        b.RequestedByName as inchargeName,
+        b.RequestedByEmail as inchargeEmail,
+        b.BookingStatus as status,
+        b.BookingCategory as activityType,
+        b.IsPriority as isPriority,
+        b.CreatedAt as createdAt,
+        b.LastModifiedAt as updatedAt,
+        b.DenialReason as denialReason,
+        r.ResourceName as resourceName,
+        r.ResourceType as resourceType,
+        r.Location as location,
+        r.Capacity as capacity,
+        a.AdminName as adminName,
+        a.AdminEmail as adminEmail
+      FROM dbo.Bookings b
+      INNER JOIN dbo.Resources r ON b.ResourceID = r.ResourceID
+      LEFT JOIN dbo.Admins a ON b.AdminID = a.AdminID
+      ${where}
+      ORDER BY b.StartTime DESC
+    `);
+        res.json({
+            success: true,
+            data: result.recordset,
+            count: result.recordset.length
+        });
+    }
+    catch (error) {
+        console.error('Error fetching bookings:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch bookings'
+        });
+    }
+});
+// Create new resource
+router.post('/resources', async (req, res) => {
+    try {
+        const { name, type, location, capacity } = req.body;
+        if (!name || !type || !location || !capacity) {
+            return res.status(400).json({
+                success: false,
+                error: 'Name, type, location, and capacity are required'
+            });
+        }
+        const pool = await (0, database_1.connectToDatabase)();
+        const result = await pool.request()
+            .input('resourceName', mssql_1.default.NVarChar, name)
+            .input('resourceType', mssql_1.default.NVarChar, type)
+            .input('location', mssql_1.default.NVarChar, location)
+            .input('capacity', mssql_1.default.Int, capacity)
+            .query(`
+        INSERT INTO dbo.Resources (ResourceName, ResourceType, Location, Capacity, IsActive)
+        OUTPUT INSERTED.ResourceID, INSERTED.ResourceName, INSERTED.ResourceType, 
+               INSERTED.Location, INSERTED.Capacity, INSERTED.IsActive
+        VALUES (@resourceName, @resourceType, @location, @capacity, 1)
+      `);
+        res.status(201).json({
+            success: true,
+            message: 'Resource created successfully',
+            data: result.recordset[0]
+        });
+    }
+    catch (error) {
+        console.error('Error creating resource:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to create resource'
+        });
+    }
+});
+// Create new booking
+router.post('/bookings', async (req, res) => {
+    try {
+        const { resourceId, adminId, requestedByName, requestedByEmail, eventTitle, startTime, endTime, bookingCategory, isPriority } = req.body;
+        if (!resourceId || !requestedByName || !requestedByEmail || !eventTitle || !startTime || !endTime) {
+            return res.status(400).json({
+                success: false,
+                error: 'All required fields must be provided'
+            });
+        }
+        const pool = await (0, database_1.connectToDatabase)();
+        // Resolve admin ID: if not provided, try to pick a default active admin
+        let resolvedAdminId = adminId ?? null;
+        if (!resolvedAdminId) {
+            const adminResult = await pool.request().query(`
+        SELECT TOP 1 AdminID
+        FROM dbo.Admins
+        WHERE IsActive = 1
+        ORDER BY AdminID ASC
+      `);
+            if (adminResult.recordset.length > 0) {
+                resolvedAdminId = adminResult.recordset[0].AdminID;
+            }
+            else {
+                // Try to upsert a default admin based on the permanent admin email
+                const defaultAdminEmail = 'admin@rajalakshmi.edu.in';
+                // Ensure a row exists in Admins
+                const upsert = await pool.request()
+                    .input('AdminName', mssql_1.default.NVarChar, 'Portal Admin')
+                    .input('AdminEmail', mssql_1.default.NVarChar, defaultAdminEmail)
+                    .query(`
+            IF EXISTS (SELECT 1 FROM dbo.Admins WHERE AdminEmail = @AdminEmail)
+            BEGIN
+              UPDATE dbo.Admins SET AdminName = @AdminName, IsActive = 1 WHERE AdminEmail = @AdminEmail;
+            END
+            ELSE
+            BEGIN
+              INSERT INTO dbo.Admins (AdminName, AdminEmail, IsActive) VALUES (@AdminName, @AdminEmail, 1);
+            END
+          `);
+                // Read back the AdminID
+                const fetchAdmin = await pool.request()
+                    .input('AdminEmail', mssql_1.default.NVarChar, defaultAdminEmail)
+                    .query(`SELECT TOP 1 AdminID FROM dbo.Admins WHERE AdminEmail = @AdminEmail AND IsActive = 1`);
+                if (fetchAdmin.recordset.length > 0) {
+                    resolvedAdminId = fetchAdmin.recordset[0].AdminID;
+                }
+            }
+        }
+        // Check for conflicts
+        const conflictCheck = await pool.request()
+            .input('resourceId', mssql_1.default.Int, resourceId)
+            .input('startTime', mssql_1.default.DateTime2, new Date(startTime))
+            .input('endTime', mssql_1.default.DateTime2, new Date(endTime))
+            .query(`
+        SELECT COUNT(*) as conflicts
+        FROM dbo.Bookings
+        WHERE ResourceID = @resourceId
+        AND BookingStatus IN ('Confirmed', 'Pending')
+        AND (
+          (StartTime < @endTime AND EndTime > @startTime)
+        )
+      `);
+        if (conflictCheck.recordset[0].conflicts > 0) {
+            return res.status(409).json({
+                success: false,
+                error: 'Resource is already booked for the selected time slot'
+            });
+        }
+        // Decide initial status: Portal Admin requests are auto-confirmed
+        let initialStatus = 'Pending';
+        try {
+            const adminCheck = await pool.request()
+                .input('reqEmail', mssql_1.default.NVarChar, String(requestedByEmail || '').trim().toLowerCase())
+                .query(`SELECT TOP 1 1 AS isAdmin FROM dbo.Admins WHERE LOWER(AdminEmail) = @reqEmail`);
+            if (adminCheck.recordset.length > 0) {
+                initialStatus = 'Confirmed';
+            }
+        }
+        catch (_) {
+            // fail open to Pending
+        }
+        // Create booking (avoid OUTPUT due to table triggers)
+        const insertResult = await pool.request()
+            .input('resourceId', mssql_1.default.Int, resourceId)
+            .input('adminId', mssql_1.default.Int, resolvedAdminId)
+            .input('requestedByName', mssql_1.default.NVarChar, requestedByName)
+            .input('requestedByEmail', mssql_1.default.NVarChar, requestedByEmail)
+            .input('eventTitle', mssql_1.default.NVarChar, eventTitle)
+            .input('startTime', mssql_1.default.DateTime2, new Date(startTime))
+            .input('endTime', mssql_1.default.DateTime2, new Date(endTime))
+            .input('bookingCategory', mssql_1.default.NVarChar, bookingCategory || 'General')
+            .input('isPriority', mssql_1.default.Bit, isPriority || false)
+            .input('initialStatus', mssql_1.default.NVarChar, initialStatus)
+            .query(`
+        INSERT INTO dbo.Bookings (
+          ResourceID, AdminID, RequestedByName, RequestedByEmail,
+          EventTitle, StartTime, EndTime, BookingStatus,
+          BookingCategory, IsPriority, CreatedAt, LastModifiedAt
+        ) VALUES (
+          @resourceId, @adminId, @requestedByName, @requestedByEmail,
+          @eventTitle, @startTime, @endTime, @initialStatus,
+          @bookingCategory, @isPriority, GETDATE(), GETDATE()
+        );
+      `);
+        // Read back the last inserted row for response
+        const created = await pool.request().query(`
+      SELECT TOP 1 * FROM dbo.Bookings ORDER BY BookingID DESC
+    `);
+        res.status(201).json({ success: true, message: 'Booking created successfully', data: created.recordset[0] });
+    }
+    catch (error) {
+        console.error('Error creating booking:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to create booking',
+            details: error instanceof Error ? error.message : String(error)
+        });
+    }
+});
+// Update booking status
+router.put('/bookings/:id/status', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, adminId, denialReason } = req.body;
+        if (!['Pending', 'Confirmed', 'Cancelled', 'Completed', 'Denied'].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid status. Must be: Pending, Confirmed, Cancelled, Completed, or Denied'
+            });
+        }
+        const pool = await (0, database_1.connectToDatabase)();
+        // Resolve AdminID robustly, ignoring client-sent adminId to avoid type issues
+        let resolvedAdminId = null;
+        try {
+            // Try any existing admin row
+            const adminResult = await pool.request().query(`
+        SELECT TOP 1 AdminID FROM dbo.Admins ORDER BY AdminID ASC
+      `);
+            if (adminResult.recordset.length > 0) {
+                const val = adminResult.recordset[0].AdminID;
+                const n = typeof val === 'number' ? val : parseInt(String(val), 10);
+                resolvedAdminId = Number.isFinite(n) ? n : null;
+            }
+            else {
+                // Create a default admin if table empty
+                const defaultAdminEmail = 'admin@rajalakshmi.edu.in';
+                await pool.request()
+                    .input('AdminName', mssql_1.default.NVarChar, 'Portal Admin')
+                    .input('AdminEmail', mssql_1.default.NVarChar, defaultAdminEmail)
+                    .query(`
+            INSERT INTO dbo.Admins (AdminName, AdminEmail, IsActive)
+            SELECT TOP 1 'Portal Admin', @AdminEmail, 1
+            WHERE NOT EXISTS (SELECT 1 FROM dbo.Admins WHERE AdminEmail = @AdminEmail);
+          `);
+                const fetchAdmin = await pool.request()
+                    .input('AdminEmail', mssql_1.default.NVarChar, defaultAdminEmail)
+                    .query(`SELECT TOP 1 AdminID FROM dbo.Admins WHERE AdminEmail = @AdminEmail`);
+                if (fetchAdmin.recordset.length > 0) {
+                    const n = parseInt(String(fetchAdmin.recordset[0].AdminID), 10);
+                    resolvedAdminId = Number.isFinite(n) ? n : null;
+                }
+            }
+        }
+        catch (_) {
+            resolvedAdminId = null; // Fall back to null; DB column AdminID is nullable
+        }
+        let result;
+        if (status === 'Denied') {
+            const updateRes = await pool.request()
+                .input('id', mssql_1.default.Int, id)
+                .input('status', mssql_1.default.NVarChar, status)
+                .input('adminId', mssql_1.default.Int, resolvedAdminId === null ? null : resolvedAdminId)
+                .input('denialReason', mssql_1.default.NVarChar, denialReason || 'No reason specified')
+                .query(`
+          UPDATE dbo.Bookings 
+          SET BookingStatus = @status, 
+              AdminID = @adminId,
+              DenialReason = @denialReason,
+              LastModifiedAt = GETDATE()
+          WHERE BookingID = @id
+        `);
+            result = await pool.request().input('id', mssql_1.default.Int, id).query('SELECT * FROM dbo.Bookings WHERE BookingID = @id');
+        }
+        else {
+            const updateRes = await pool.request()
+                .input('id', mssql_1.default.Int, id)
+                .input('status', mssql_1.default.NVarChar, status)
+                .input('adminId', mssql_1.default.Int, resolvedAdminId)
+                .query(`
+          UPDATE dbo.Bookings 
+          SET BookingStatus = @status, 
+              AdminID = @adminId,
+              LastModifiedAt = GETDATE()
+          WHERE BookingID = @id
+        `);
+            result = await pool.request().input('id', mssql_1.default.Int, id).query('SELECT * FROM dbo.Bookings WHERE BookingID = @id');
+        }
+        if (result.recordset.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Booking not found'
+            });
+        }
+        // Log the action in audit logs
+        if (adminId) {
+            await pool.request()
+                .input('bookingId', mssql_1.default.Int, id)
+                .input('adminId', mssql_1.default.Int, adminId)
+                .input('action', mssql_1.default.NVarChar, `Status changed to ${status}`)
+                .input('details', mssql_1.default.NVarChar, status === 'Denied' ? `Reason: ${denialReason || 'No reason specified'}` : `Booking status updated from system`)
+                .query(`
+          INSERT INTO dbo.AuditLogs (BookingID, AdminID, Action, Details, Timestamp)
+          VALUES (@bookingId, @adminId, @action, @details, GETDATE())
+        `);
+        }
+        res.json({
+            success: true,
+            message: 'Booking status updated successfully',
+            data: result.recordset[0]
+        });
+    }
+    catch (error) {
+        console.error('Error updating booking status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update booking status',
+            details: error instanceof Error ? error.message : String(error)
+        });
+    }
+});
+// Get audit logs
+router.get('/audit-logs', async (req, res) => {
+    try {
+        const pool = await (0, database_1.connectToDatabase)();
+        const result = await pool.request().query(`
+      SELECT 
+        al.LogID as id,
+        al.Action as action,
+        al.Details as details,
+        al.Timestamp as timestamp,
+        b.EventTitle as eventTitle,
+        a.AdminName as adminName
+      FROM dbo.AuditLogs al
+      LEFT JOIN dbo.Bookings b ON al.BookingID = b.BookingID
+      LEFT JOIN dbo.Admins a ON al.AdminID = a.AdminID
+      ORDER BY al.Timestamp DESC
+    `);
+        res.json({
+            success: true,
+            data: result.recordset,
+            count: result.recordset.length
+        });
+    }
+    catch (error) {
+        console.error('Error fetching audit logs:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch audit logs'
+        });
+    }
+});
+// Delete resource (soft delete)
+router.delete('/resources/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const pool = await (0, database_1.connectToDatabase)();
+        const result = await pool.request()
+            .input('id', mssql_1.default.Int, id)
+            .query(`
+        UPDATE dbo.Resources 
+        SET IsActive = 0
+        WHERE ResourceID = @id
+      `);
+        if (result.rowsAffected[0] === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Resource not found'
+            });
+        }
+        res.json({
+            success: true,
+            message: 'Resource deleted successfully'
+        });
+    }
+    catch (error) {
+        console.error('Error deleting resource:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to delete resource'
+        });
+    }
+});
+//# sourceMappingURL=campus-db.js.map
