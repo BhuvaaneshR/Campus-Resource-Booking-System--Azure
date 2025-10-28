@@ -23,12 +23,12 @@ variables:
   sonarProjectName: 'Campus Resource Booking'
 
 stages:
-# ========== STAGE 0: CODE SCAN (SonarCloud) ==========
+# ========== STAGE 0: CODE SCAN (SonarCloud via CLI, no service connection) ==========
 - stage: CodeScan
-  displayName: 'Static Analysis: SonarCloud'
+  displayName: 'Static Analysis: SonarCloud (CLI)'
   jobs:
-  - job: Sonar
-    displayName: 'Run SonarCloud Analysis'
+  - job: SonarCLI
+    displayName: 'Run SonarScanner CLI'
     pool:
       vmImage: 'ubuntu-latest'
     steps:
@@ -37,16 +37,7 @@ stages:
         versionSpec: '18.x'
       displayName: 'Use Node 18.x'
 
-    - task: SonarCloudPrepare@3
-      displayName: 'SonarCloud: Prepare'
-      inputs:
-        SonarCloud: '$(sonarServiceConnection)'
-        organization: '$(sonarOrganization)'
-        scannerMode: 'Other'
-        projectKey: '$(sonarProjectKey)'
-        projectName: '$(sonarProjectName)'
-
-    # Build backend & frontend (enables TS parsing & lets Sonar see sources)
+    # Build so the scanner sees sources (adjust if needed)
     - script: |
         cd backend
         npm ci
@@ -58,12 +49,23 @@ stages:
         npm run build
       displayName: 'Build frontend (tsc)'
 
-    - task: SonarCloudAnalyze@3
-      displayName: 'SonarCloud: Analyze'
-    - task: SonarCloudPublish@3
-      displayName: 'SonarCloud: Publish'
-      inputs:
-        pollingTimeoutSec: '300'
+    # Download and run SonarScanner CLI
+    - bash: |
+        set -e
+        curl -sSLo scanner.zip https://get.sonarcloud.io/sonar-scanner-cli-linux.zip
+        unzip -q scanner.zip -d $(Agent.BuildDirectory)
+        SCANNER="$(Agent.BuildDirectory)"/sonar-scanner-*/bin/sonar-scanner
+
+        "$SCANNER" \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.login=$9788f4888c49bc1638d6f3136dda50e4ef6e0154 \
+          -Dsonar.organization=bhuvaanesh-045 \
+          -Dsonar.projectKey=Bhuvaanesh-045_Online-Resource-Booking-System \
+          -Dsonar.projectName="Online Resource Booking System" \
+          -Dsonar.sources=backend,frontend \
+          -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**
+      displayName: 'Run SonarScanner'
+
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
 - stage: Build
