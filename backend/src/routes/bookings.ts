@@ -15,8 +15,8 @@ const timeStr = z.string(); // "HH:mm" — can harden with regex
 const createBookingBodySchema = z.object({
   eventName: z.string().min(3),
   resourceId: intId,
-  startDateTime: z.string().datetime().transform((s) => new Date(s)),
-  endDateTime: z.string().datetime().transform((s) => new Date(s)),
+  startDateTime: z.string().datetime().transform((s: string) => new Date(s)),
+  endDateTime: z.string().datetime().transform((s: string) => new Date(s)),
   activityType: z.string().default('General'),
   participantCount: z.coerce.number().int().nonnegative().optional(),
   inchargeName: z.string().min(2),
@@ -26,8 +26,8 @@ const createBookingBodySchema = z.object({
 const updateBookingBodySchema = z.object({
   eventName: z.string().min(3).optional(),
   resourceId: intId.optional(),
-  startDateTime: z.string().datetime().transform((s) => new Date(s)).optional(),
-  endDateTime: z.string().datetime().transform((s) => new Date(s)).optional(),
+  startDateTime: z.string().datetime().transform((s: string) => new Date(s)).optional(),
+  endDateTime: z.string().datetime().transform((s: string) => new Date(s)).optional(),
   activityType: z.string().optional(),
   participantCount: z.coerce.number().int().nonnegative().optional(),
   inchargeName: z.string().min(2).optional(),
