@@ -34,8 +34,8 @@ stages:
     steps:
     - task: NodeTool@0
       inputs:
-        versionSpec: '18.x'
-      displayName: 'Use Node 18.x'
+        versionSpec: '20.x'
+      displayName: 'Use Node 20.x'
 
     # Build so the scanner sees sources (adjust if needed)
     - script: |
