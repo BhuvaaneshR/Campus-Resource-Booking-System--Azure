@@ -127,3 +127,35 @@ output "acr_login_server" {
   value = azurerm_container_registry.acr.login_server
   description = "Container Registry URL"
 }
+# 8. Define AKS Cluster
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "campusbookingaks"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  dns_prefix          = "campusbooking"
+
+  default_node_pool {
+    name       = "nodepool1"
+    node_count = 1
+    vm_size    = "Standard_B2s"
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  network_profile {
+    network_plugin = "azure"
+  }
+
+  tags = {
+    environment = "production"
+  }
+}
+
+# 9. Grant AKS access to pull from ACR
+resource "azurerm_role_assignment" "aks_acr_pull" {
+  principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
+  role_definition_name = "AcrPull"
+  scope                = azurerm_container_registry.acr.id
+}

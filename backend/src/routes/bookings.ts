@@ -1,11 +1,70 @@
 import { Router, Request, Response } from 'express';
 import { connectToDatabase } from '../config/database';
 import sql from 'mssql';
+import { z } from 'zod';
 
 const router = Router();
 
+/** ----------------- Helpers & Schemas ----------------- **/
+
+const intId = z.coerce.number().int().positive();
+const email = z.string().email();
+const isoDate = z.string(); // you can harden with regex if needed
+const timeStr = z.string(); // "HH:mm" — can harden with regex
+
+const createBookingBodySchema = z.object({
+  eventName: z.string().min(3),
+  resourceId: intId,
+  startDateTime: z.string().datetime().transform(s => new Date(s)),
+  endDateTime: z.string().datetime().transform(s => new Date(s)),
+  activityType: z.string().default('General'),
+  participantCount: z.coerce.number().int().nonnegative().optional(),
+  inchargeName: z.string().min(2),
+  inchargeEmail: email,
+});
+
+const updateBookingBodySchema = z.object({
+  eventName: z.string().min(3).optional(),
+  resourceId: intId.optional(),
+  startDateTime: z.string().datetime().transform(s => new Date(s)).optional(),
+  endDateTime: z.string().datetime().transform(s => new Date(s)).optional(),
+  activityType: z.string().optional(),
+  participantCount: z.coerce.number().int().nonnegative().optional(),
+  inchargeName: z.string().min(2).optional(),
+  inchargeEmail: email.optional(),
+  status: z.enum(['Confirmed', 'Pending Approval', 'Cancelled', 'Cancelled - Overridden']).optional(),
+});
+
+const requestBookingBodySchema = z.object({
+  eventName: z.string().min(3),
+  resourceId: intId,
+  startDate: isoDate,
+  endDate: isoDate,
+  startTime: timeStr,
+  endTime: timeStr,
+  description: z.string().optional(),
+  attendeeCount: z.coerce.number().int().nonnegative().optional(),
+  contactPhone: z.string().min(7),
+});
+
+const priorityBookingBodySchema = requestBookingBodySchema;
+
+/** Combine a date (YYYY-MM-DD) and time (HH:mm) to a JS Date in local time */
+function combineDateTime(dateStr: string, time: string) {
+  // Keep it simple: let JS parse "YYYY-MM-DDTHH:mm"
+  const d = new Date(`${dateStr}T${time}`);
+  if (Number.isNaN(d.getTime())) throw new Error('Invalid date/time');
+  return d;
+}
+
+/** SQL overlap condition is already correct:
+ *   (startDateTime < @endDateTime AND endDateTime > @startDateTime)
+ */
+
+/** ----------------- Routes ----------------- **/
+
 // Get all bookings
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response) => {
   try {
     const pool = await connectToDatabase();
     const result = await pool.request().query(`
@@ -29,11 +88,7 @@ router.get('/', async (req: Request, res: Response) => {
       ORDER BY b.startDateTime DESC
     `);
 
-    res.json({
-      success: true,
-      data: result.recordset
-    });
-
+    res.json({ success: true, data: result.recordset });
   } catch (error) {
     console.error('Error fetching bookings:', error);
     res.status(500).json({ error: 'Failed to fetch bookings' });
@@ -43,9 +98,9 @@ router.get('/', async (req: Request, res: Response) => {
 // Get booking by ID
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = intId.parse(req.params.id);
     const pool = await connectToDatabase();
-    
+
     const result = await pool.request()
       .input('id', sql.Int, id)
       .query(`
@@ -63,63 +118,55 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    res.json({
-      success: true,
-      data: result.recordset[0]
-    });
-
+    res.json({ success: true, data: result.recordset[0] });
   } catch (error) {
     console.error('Error fetching booking:', error);
     res.status(500).json({ error: 'Failed to fetch booking' });
   }
 });
 
-// Create new booking
+// Create new booking (Admin direct confirm)
 router.post('/', async (req: Request, res: Response) => {
   try {
+    const parsed = createBookingBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
     const {
-      eventName,
-      resourceId,
-      startDateTime,
-      endDateTime,
-      activityType,
-      participantCount,
-      inchargeName,
-      inchargeEmail
-    } = req.body;
+      eventName, resourceId, startDateTime, endDateTime,
+      activityType, participantCount, inchargeName, inchargeEmail,
+    } = parsed.data;
 
-    // Validate required fields
-    if (!eventName || !resourceId || !startDateTime || !endDateTime || !inchargeName || !inchargeEmail) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (startDateTime >= endDateTime) {
+      return res.status(400).json({ error: 'End time must be after start time' });
     }
 
-    // Check for conflicts
     const pool = await connectToDatabase();
+
+    // Conflict check (confirmed)
     const conflictCheck = await pool.request()
       .input('resourceId', sql.Int, resourceId)
-      .input('startDateTime', sql.DateTime, new Date(startDateTime))
-      .input('endDateTime', sql.DateTime, new Date(endDateTime))
+      .input('startDateTime', sql.DateTime, startDateTime)
+      .input('endDateTime', sql.DateTime, endDateTime)
       .query(`
         SELECT id FROM Bookings 
         WHERE resourceId = @resourceId 
-        AND status = 'Confirmed'
-        AND (
-          (startDateTime < @endDateTime AND endDateTime > @startDateTime)
-        )
+          AND status = 'Confirmed'
+          AND (startDateTime < @endDateTime AND endDateTime > @startDateTime)
       `);
 
     if (conflictCheck.recordset.length > 0) {
       return res.status(409).json({ error: 'Resource is already booked for this time slot' });
     }
 
-    // Create booking
+    // Insert
     const result = await pool.request()
       .input('eventName', sql.NVarChar, eventName)
       .input('resourceId', sql.Int, resourceId)
-      .input('startDateTime', sql.DateTime, new Date(startDateTime))
-      .input('endDateTime', sql.DateTime, new Date(endDateTime))
-      .input('activityType', sql.NVarChar, activityType)
-      .input('participantCount', sql.Int, participantCount)
+      .input('startDateTime', sql.DateTime, startDateTime)
+      .input('endDateTime', sql.DateTime, endDateTime)
+      .input('activityType', sql.NVarChar, activityType || 'General')
+      .input('participantCount', sql.Int, participantCount ?? null)
       .input('inchargeName', sql.NVarChar, inchargeName)
       .input('inchargeEmail', sql.NVarChar, inchargeEmail)
       .input('status', sql.NVarChar, 'Confirmed')
@@ -132,12 +179,8 @@ router.post('/', async (req: Request, res: Response) => {
 
     res.status(201).json({
       success: true,
-      data: {
-        id: result.recordset[0].id,
-        message: 'Booking created successfully'
-      }
+      data: { id: result.recordset[0].id, message: 'Booking created successfully' },
     });
-
   } catch (error) {
     console.error('Error creating booking:', error);
     res.status(500).json({ error: 'Failed to create booking' });
@@ -147,21 +190,23 @@ router.post('/', async (req: Request, res: Response) => {
 // Update booking
 router.put('/:id', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = intId.parse(req.params.id);
+    const parsed = updateBookingBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
+    }
+
     const {
-      eventName,
-      resourceId,
-      startDateTime,
-      endDateTime,
-      activityType,
-      participantCount,
-      inchargeName,
-      inchargeEmail,
-      status
-    } = req.body;
+      eventName, resourceId, startDateTime, endDateTime,
+      activityType, participantCount, inchargeName, inchargeEmail, status,
+    } = parsed.data;
+
+    if (startDateTime && endDateTime && startDateTime >= endDateTime) {
+      return res.status(400).json({ error: 'End time must be after start time' });
+    }
 
     const pool = await connectToDatabase();
-    
+
     // Check if booking exists
     const existingBooking = await pool.request()
       .input('id', sql.Int, id)
@@ -171,61 +216,53 @@ router.put('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    // Check for conflicts (excluding current booking)
+    // Conflict check (excluding current)
     if (resourceId && startDateTime && endDateTime) {
       const conflictCheck = await pool.request()
         .input('resourceId', sql.Int, resourceId)
-        .input('startDateTime', sql.DateTime, new Date(startDateTime))
-        .input('endDateTime', sql.DateTime, new Date(endDateTime))
+        .input('startDateTime', sql.DateTime, startDateTime)
+        .input('endDateTime', sql.DateTime, endDateTime)
         .input('excludeId', sql.Int, id)
         .query(`
           SELECT id FROM Bookings 
           WHERE resourceId = @resourceId 
-          AND id != @excludeId
-          AND status = 'Confirmed'
-          AND (
-            (startDateTime < @endDateTime AND endDateTime > @startDateTime)
-          )
+            AND id != @excludeId
+            AND status = 'Confirmed'
+            AND (startDateTime < @endDateTime AND endDateTime > @startDateTime)
         `);
-
       if (conflictCheck.recordset.length > 0) {
         return res.status(409).json({ error: 'Resource is already booked for this time slot' });
       }
     }
 
-    // Update booking
-    const result = await pool.request()
+    await pool.request()
       .input('id', sql.Int, id)
-      .input('eventName', sql.NVarChar, eventName)
-      .input('resourceId', sql.Int, resourceId)
-      .input('startDateTime', sql.DateTime, startDateTime ? new Date(startDateTime) : null)
-      .input('endDateTime', sql.DateTime, endDateTime ? new Date(endDateTime) : null)
-      .input('activityType', sql.NVarChar, activityType)
-      .input('participantCount', sql.Int, participantCount)
-      .input('inchargeName', sql.NVarChar, inchargeName)
-      .input('inchargeEmail', sql.NVarChar, inchargeEmail)
-      .input('status', sql.NVarChar, status)
+      .input('eventName', sql.NVarChar, eventName ?? null)
+      .input('resourceId', sql.Int, resourceId ?? null)
+      .input('startDateTime', sql.DateTime, startDateTime ?? null)
+      .input('endDateTime', sql.DateTime, endDateTime ?? null)
+      .input('activityType', sql.NVarChar, activityType ?? null)
+      .input('participantCount', sql.Int, participantCount ?? null)
+      .input('inchargeName', sql.NVarChar, inchargeName ?? null)
+      .input('inchargeEmail', sql.NVarChar, inchargeEmail ?? null)
+      .input('status', sql.NVarChar, status ?? null)
       .query(`
         UPDATE Bookings 
         SET 
-          eventName = COALESCE(@eventName, eventName),
-          resourceId = COALESCE(@resourceId, resourceId),
+          eventName     = COALESCE(@eventName, eventName),
+          resourceId    = COALESCE(@resourceId, resourceId),
           startDateTime = COALESCE(@startDateTime, startDateTime),
-          endDateTime = COALESCE(@endDateTime, endDateTime),
-          activityType = COALESCE(@activityType, activityType),
+          endDateTime   = COALESCE(@endDateTime, endDateTime),
+          activityType  = COALESCE(@activityType, activityType),
           participantCount = COALESCE(@participantCount, participantCount),
-          inchargeName = COALESCE(@inchargeName, inchargeName),
+          inchargeName  = COALESCE(@inchargeName, inchargeName),
           inchargeEmail = COALESCE(@inchargeEmail, inchargeEmail),
-          status = COALESCE(@status, status),
-          updatedAt = GETDATE()
+          status        = COALESCE(@status, status),
+          updatedAt     = GETDATE()
         WHERE id = @id
       `);
 
-    res.json({
-      success: true,
-      message: 'Booking updated successfully'
-    });
-
+    res.json({ success: true, message: 'Booking updated successfully' });
   } catch (error) {
     console.error('Error updating booking:', error);
     res.status(500).json({ error: 'Failed to update booking' });
@@ -235,9 +272,9 @@ router.put('/:id', async (req: Request, res: Response) => {
 // Delete booking
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = intId.parse(req.params.id);
     const pool = await connectToDatabase();
-    
+
     const result = await pool.request()
       .input('id', sql.Int, id)
       .query('DELETE FROM Bookings WHERE id = @id');
@@ -246,24 +283,18 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    res.json({
-      success: true,
-      message: 'Booking deleted successfully'
-    });
-
+    res.json({ success: true, message: 'Booking deleted successfully' });
   } catch (error) {
     console.error('Error deleting booking:', error);
     res.status(500).json({ error: 'Failed to delete booking' });
   }
 });
 
-// Get booking requests for current user (Faculty specific endpoint)
+// Get booking requests for current user (Faculty)
 router.get('/my-requests', async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user; // From auth middleware
-    if (!user) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
+    const user = (req as any).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required' });
 
     const pool = await connectToDatabase();
     const result = await pool.request()
@@ -294,69 +325,58 @@ router.get('/my-requests', async (req: Request, res: Response) => {
         ORDER BY b.createdAt DESC
       `);
 
-    // Transform the data to match frontend expectations
-    const bookings = result.recordset.map(booking => ({
-      id: booking.id,
-      eventName: booking.eventName,
-      resourceName: booking.resourceName,
-      location: booking.location,
-      startDate: booking.startDateTime.toISOString().split('T')[0],
-      endDate: booking.endDateTime.toISOString().split('T')[0],
-      startTime: booking.startDateTime.toTimeString().slice(0, 5),
-      endTime: booking.endDateTime.toTimeString().slice(0, 5),
-      status: booking.status,
-      requesterName: booking.inchargeName,
-      requesterEmail: booking.inchargeEmail,
-      contactPhone: booking.contactPhone,
-      attendeeCount: booking.participantCount,
-      description: booking.description,
-      isUrgent: booking.isUrgent,
-      createdAt: booking.createdAt.toISOString(),
-      rejectionReason: booking.rejectionReason
+    const bookings = result.recordset.map((b: any) => ({
+      id: b.id,
+      eventName: b.eventName,
+      resourceName: b.resourceName,
+      location: b.location,
+      startDate: b.startDateTime?.toISOString().split('T')[0],
+      endDate: b.endDateTime?.toISOString().split('T')[0],
+      startTime: b.startDateTime?.toTimeString().slice(0, 5),
+      endTime: b.endDateTime?.toTimeString().slice(0, 5),
+      status: b.status,
+      requesterName: b.inchargeName,
+      requesterEmail: b.inchargeEmail,
+      contactPhone: b.contactPhone,
+      attendeeCount: b.participantCount,
+      description: b.description,
+      isUrgent: b.isUrgent,
+      createdAt: b.createdAt?.toISOString(),
+      rejectionReason: b.rejectionReason,
     }));
 
-    res.json({
-      success: true,
-      bookings: bookings
-    });
-
+    res.json({ success: true, bookings });
   } catch (error) {
     console.error('Error fetching user bookings:', error);
     res.status(500).json({ error: 'Failed to fetch your bookings' });
   }
 });
 
-// Create booking request (Faculty submission - goes to "Pending Approval")
+// Create booking request (Faculty → Pending Approval)
 router.post('/requests', async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user; // From auth middleware
-    if (!user) {
-      return res.status(401).json({ error: 'Authentication required' });
+    const user = (req as any).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required' });
+
+    const parsed = requestBookingBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
     }
 
     const {
-      eventName,
-      resourceId,
-      startDate,
-      endDate,
-      startTime,
-      endTime,
-      description,
-      attendeeCount,
-      contactPhone
-    } = req.body;
+      eventName, resourceId, startDate, endDate, startTime, endTime,
+      description, attendeeCount, contactPhone,
+    } = parsed.data;
 
-    // Validate required fields
-    if (!eventName || !resourceId || !startDate || !endDate || !startTime || !endTime || !contactPhone) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    const startDateTime = combineDateTime(startDate, startTime);
+    const endDateTime = combineDateTime(endDate, endTime);
+    if (startDateTime >= endDateTime) {
+      return res.status(400).json({ error: 'End time must be after start time' });
     }
 
-    // Combine date and time
-    const startDateTime = new Date(`${startDate}T${startTime}`);
-    const endDateTime = new Date(`${endDate}T${endTime}`);
-
-    // Check for conflicts with confirmed bookings
     const pool = await connectToDatabase();
+
+    // Conflict check (confirmed)
     const conflictCheck = await pool.request()
       .input('resourceId', sql.Int, resourceId)
       .input('startDateTime', sql.DateTime, startDateTime)
@@ -364,28 +384,25 @@ router.post('/requests', async (req: Request, res: Response) => {
       .query(`
         SELECT id FROM Bookings 
         WHERE resourceId = @resourceId 
-        AND status = 'Confirmed'
-        AND (
-          (startDateTime < @endDateTime AND endDateTime > @startDateTime)
-        )
+          AND status = 'Confirmed'
+          AND (startDateTime < @endDateTime AND endDateTime > @startDateTime)
       `);
 
     if (conflictCheck.recordset.length > 0) {
       return res.status(409).json({ error: 'Resource is already booked for this time slot' });
     }
 
-    // Create booking request with "Pending Approval" status
     const result = await pool.request()
       .input('eventName', sql.NVarChar, eventName)
       .input('resourceId', sql.Int, resourceId)
       .input('startDateTime', sql.DateTime, startDateTime)
       .input('endDateTime', sql.DateTime, endDateTime)
-      .input('activityType', sql.NVarChar, 'General') // Default activity type
-      .input('participantCount', sql.Int, attendeeCount)
+      .input('activityType', sql.NVarChar, 'General')
+      .input('participantCount', sql.Int, attendeeCount ?? null)
       .input('inchargeName', sql.NVarChar, user.name)
       .input('inchargeEmail', sql.NVarChar, user.email)
       .input('contactPhone', sql.NVarChar, contactPhone)
-      .input('description', sql.NVarChar, description)
+      .input('description', sql.NVarChar, description ?? null)
       .input('status', sql.NVarChar, 'Pending Approval')
       .input('isUrgent', sql.Bit, false)
       .query(`
@@ -399,139 +416,44 @@ router.post('/requests', async (req: Request, res: Response) => {
       success: true,
       data: {
         id: result.recordset[0].id,
-        message: 'Booking request submitted successfully and is pending approval'
-      }
+        message: 'Booking request submitted successfully and is pending approval',
+      },
     });
-
   } catch (error) {
     console.error('Error creating booking request:', error);
     res.status(500).json({ error: 'Failed to submit booking request' });
   }
 });
 
-// Priority booking endpoint (for Placement Executives)
+// Priority booking (Placement Exec, overrides conflicts)
 router.post('/priority-booking', async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user; // From auth middleware
-    if (!user) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
+    const user = (req as any).user;
+    if (!user) return res.status(401).json({ error: 'Authentication required' });
 
-    // Check if user is Placement Executive
     if (user.role !== 'Placement Executive') {
       return res.status(403).json({ error: 'Only Placement Executives can create priority bookings' });
     }
 
-    const {
-      eventName,
-      resourceId,
-      startDate,
-      endDate,
-      startTime,
-      endTime,
-      description,
-      attendeeCount,
-      contactPhone
-    } = req.body;
-
-    // Validate required fields
-    if (!eventName || !resourceId || !startDate || !endDate || !startTime || !endTime || !contactPhone) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    const parsed = priorityBookingBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    // Combine date and time
-    const startDateTime = new Date(`${startDate}T${startTime}`);
-    const endDateTime = new Date(`${endDate}T${endTime}`);
+    const {
+      eventName, resourceId, startDate, endDate, startTime, endTime,
+      description, attendeeCount, contactPhone,
+    } = parsed.data;
+
+    const startDateTime = combineDateTime(startDate, startTime);
+    const endDateTime = combineDateTime(endDate, endTime);
+    if (startDateTime >= endDateTime) {
+      return res.status(400).json({ error: 'End time must be after start time' });
+    }
 
     const pool = await connectToDatabase();
-    
-    // Check for conflicting bookings (both confirmed and pending)
+
+    // Conflicts (confirmed + pending) to override
     const conflictCheck = await pool.request()
       .input('resourceId', sql.Int, resourceId)
       .input('startDateTime', sql.DateTime, startDateTime)
-      .input('endDateTime', sql.DateTime, endDateTime)
-      .query(`
-        SELECT id, eventName, inchargeName, inchargeEmail, status 
-        FROM Bookings 
-        WHERE resourceId = @resourceId 
-        AND status IN ('Confirmed', 'Pending Approval')
-        AND (
-          (startDateTime < @endDateTime AND endDateTime > @startDateTime)
-        )
-      `);
-
-    // If there are conflicts, override them
-    if (conflictCheck.recordset.length > 0) {
-      // Update conflicting bookings to "Cancelled - Overridden"
-      await pool.request()
-        .input('resourceId', sql.Int, resourceId)
-        .input('startDateTime', sql.DateTime, startDateTime)
-        .input('endDateTime', sql.DateTime, endDateTime)
-        .query(`
-          UPDATE Bookings 
-          SET status = 'Cancelled - Overridden', 
-              updatedAt = GETDATE()
-          WHERE resourceId = @resourceId 
-          AND status IN ('Confirmed', 'Pending Approval')
-          AND (
-            (startDateTime < @endDateTime AND endDateTime > @startDateTime)
-          )
-        `);
-    }
-
-    // Create urgent booking with "Confirmed" status
-    const result = await pool.request()
-      .input('eventName', sql.NVarChar, eventName)
-      .input('resourceId', sql.Int, resourceId)
-      .input('startDateTime', sql.DateTime, startDateTime)
-      .input('endDateTime', sql.DateTime, endDateTime)
-      .input('activityType', sql.NVarChar, 'Placement Activity')
-      .input('participantCount', sql.Int, attendeeCount)
-      .input('inchargeName', sql.NVarChar, user.name)
-      .input('inchargeEmail', sql.NVarChar, user.email)
-      .input('contactPhone', sql.NVarChar, contactPhone)
-      .input('description', sql.NVarChar, description)
-      .input('status', sql.NVarChar, 'Confirmed')
-      .input('isUrgent', sql.Bit, true)
-      .query(`
-        INSERT INTO Bookings 
-        (eventName, resourceId, startDateTime, endDateTime, activityType, participantCount, inchargeName, inchargeEmail, contactPhone, description, status, isUrgent, createdAt, updatedAt)
-        OUTPUT INSERTED.id
-        VALUES (@eventName, @resourceId, @startDateTime, @endDateTime, @activityType, @participantCount, @inchargeName, @inchargeEmail, @contactPhone, @description, @status, @isUrgent, GETDATE(), GETDATE())
-      `);
-
-    res.status(201).json({
-      success: true,
-      data: {
-        id: result.recordset[0].id,
-        message: 'Priority booking created successfully',
-        overriddenBookings: conflictCheck.recordset.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Error creating priority booking:', error);
-    res.status(500).json({ error: 'Failed to create priority booking' });
-  }
-});
-
-// Get user role endpoint
-router.get('/user/role', async (req: Request, res: Response) => {
-  try {
-    const user = (req as any).user; // From auth middleware
-    if (!user) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    res.json({
-      success: true,
-      role: user.role
-    });
-
-  } catch (error) {
-    console.error('Error fetching user role:', error);
-    res.status(500).json({ error: 'Failed to fetch user role' });
-  }
-});
-
-export { router as bookingRoutes };
