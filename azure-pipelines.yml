@@ -21,6 +21,8 @@ variables:
     value: 'https://campus-booking-backend-api.azurewebsites.net/api'
   - name: azureSubscription
     value: 'azure-students-connection'
+  - name: SCANNER_VER
+    value: '6.2.1.4610'  
 
   # (Optional) set SCANNER_VER to force a specific SonarScanner version, e.g. '5.0.1.3006'
   # If unset, we'll default to 6.2.1.4610.
