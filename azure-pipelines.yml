@@ -3,24 +3,26 @@ trigger:
     include:
       - main
 
+# ================== VARIABLES ==================
 variables:
-  # ===== Azure resources (EDIT IF NEEDED) =====
-  acrName: 'campusbookingacr'
-  resourceGroup: 'campusbookingrg'
-  backendAppName: 'campus-booking-backend-api'
-  frontendAppName: 'campus-booking-frontend-web'
+# 1) Bring in your Library > Variable Group
+- group: CampusResourceBookingVariableGroup   # contains SONAR_TOKEN, sonarOrganization, sonarProjectKey, sonarProjectName
 
-  # URL used to build the frontend (EDIT IF YOUR API URL DIFFERS)
-  backendUrl: 'https://campus-booking-backend-api.azurewebsites.net/api'
+# 2) Regular name/value vars for infra & CI/CD
+- name: acrName
+  value: 'campusbookingacr'
+- name: resourceGroup
+  value: 'campusbookingrg'
+- name: backendAppName
+  value: 'campus-booking-backend-api'
+- name: frontendAppName
+  value: 'campus-booking-frontend-web'
+- name: backendUrl
+  value: 'https://campus-booking-backend-api.azurewebsites.net/api'
+- name: azureSubscription
+  value: 'azure-students-connection'
 
-  # ===== Service connections (EDIT IF YOUR NAME DIFFERS) =====
-  azureSubscription: 'azure-students-connection'
-
-  # ===== SonarCloud project info (EDIT TO MATCH SONARCLOUD) =====
-  sonarOrganization: 'bhuvaanesh-045'                           # e.g., your SonarCloud org key
-  sonarProjectKey: 'Bhuvaanesh-045_Online-Resource-Booking-System'  # exact Project Key
-  sonarProjectName: 'Online Resource Booking System'                 # display name (can have spaces)
-
+# ================== STAGES ==================
 stages:
 
 # ========== STAGE 0: CODE SCAN (SonarCloud via CLI) ==========
@@ -54,10 +56,10 @@ stages:
       - task: Bash@3
         displayName: 'Install & run SonarScanner (CLI)'
         env:
-          SONAR_TOKEN: $(SONAR_TOKEN)           # <-- secret pipeline variable you create
-          SONAR_ORG: $(sonarOrganization)       # or hardcode 'bhuvaanesh-045'
-          SONAR_PROJECT_KEY: $(sonarProjectKey)
-          SONAR_PROJECT_NAME: $(sonarProjectName)
+          SONAR_TOKEN: $(SONAR_TOKEN)              # from Variable Group (secret)
+          SONAR_ORG: $(sonarOrganization)          # from Variable Group
+          SONAR_PROJECT_KEY: $(sonarProjectKey)    # from Variable Group
+          SONAR_PROJECT_NAME: $(sonarProjectName)  # from Variable Group
         inputs:
           targetType: 'inline'
           script: |
@@ -67,7 +69,8 @@ stages:
             : "${SONAR_PROJECT_KEY:?SONAR_PROJECT_KEY is not set}"
             : "${SONAR_PROJECT_NAME:?SONAR_PROJECT_NAME is not set}"
 
-            VER="6.2.1.4610"
+            # Pin to 5.0.1 to avoid server-managed engine 403s
+            VER="5.0.1.3006"
             ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
             URL="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${ZIP}"
 
@@ -83,7 +86,6 @@ stages:
             echo "SonarScanner version:"
             sonar-scanner --version
 
-            # Run scan from repo root. NOTE: quotes protect spaces.
             sonar-scanner \
               -Dsonar.host.url=https://sonarcloud.io \
               -Dsonar.organization="${SONAR_ORG}" \
@@ -91,7 +93,6 @@ stages:
               -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
               -Dsonar.sources=. \
               -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
-              -Dsonar.scanner.skipJreProvisioning=true \
               -Dsonar.token="${SONAR_TOKEN}"
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
@@ -130,7 +131,7 @@ stages:
 # ========== STAGE 2: TERRAFORM VALIDATION ==========
 - stage: TerraformValidate
   displayName: 'Validate Terraform Configuration'
-  dependsOn: []  # Can run independently
+  dependsOn: []
   jobs:
   - job: Validate
     displayName: 'Terraform Validation'
@@ -146,7 +147,7 @@ stages:
           set -e
           cd terraform
           terraform init -backend=false
-          terraform fmt -recursive   # format files instead of failing with exit code 3
+          terraform fmt -recursive
           terraform validate
           echo "✓ Terraform configuration is valid"
         displayName: 'Validate Terraform Code'
