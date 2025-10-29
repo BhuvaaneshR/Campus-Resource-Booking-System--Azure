@@ -61,8 +61,8 @@ stages:
         targetType: 'inline'
         script: |
           set -euo pipefail
-          VER=5.0.1.3006
-          ZIP="sonar-scanner-$VER-linux.zip"
+          VER="6.2.1.4610"
+          ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
 
           # Download official CLI
           curl -sSLo "$ZIP" "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$ZIP"
