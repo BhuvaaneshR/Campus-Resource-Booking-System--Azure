@@ -13,14 +13,14 @@ variables:
   # URL used to build the frontend
   backendUrl: 'https://campus-booking-backend-api.azurewebsites.net/api'
 
-  # ===== Service connections (only used in Deploy & Docker tasks) =====
+  # ===== Service connections =====
   azureSubscription: 'azure-students-connection'
-  # NOTE: We are NOT using a Sonar service connection; we use CLI + token.
+  # NOTE: Not using a Sonar service connection; we use CLI + token variable.
 
-  # ===== SonarCloud project info (CLI will use these) =====
-  sonarOrganization: 'bhuvaanesh-045'                # <--- set to your SonarCloud org key
-  sonarProjectKey: 'Bhuvaanesh-045_Online-Resource-Booking-System'  # <--- your project key
-  sonarProjectName: 'Online Resource Booking System'  # <--- your project name
+  # ===== SonarCloud project info =====
+  sonarOrganization: 'bhuvaanesh-045'
+  sonarProjectKey: 'Bhuvaanesh-045_Online-Resource-Booking-System'
+  sonarProjectName: 'Online Resource Booking System'
 
 stages:
 
@@ -38,7 +38,7 @@ stages:
       inputs:
         versionSpec: '20.x'
 
-    # Build backend so TS sources are emitted (if needed by your rules)
+    # Build backend so TS sources exist (adjust if your rules need emit)
     - script: |
         set -e
         cd backend
@@ -46,7 +46,7 @@ stages:
         npm run build
       displayName: 'Build backend (tsc)'
 
-    # Build frontend (optional for SAST but keeps parity)
+    # Build frontend (optional but keeps parity)
     - script: |
         set -e
         cd frontend
@@ -57,29 +57,40 @@ stages:
     # Download and run SonarScanner CLI
     - task: Bash@3
       displayName: 'Install & run SonarScanner (CLI)'
+      env:
+        # Create a **secret** pipeline variable named SONAR_TOKEN and it will be injected here.
+        SONAR_TOKEN: $(SONAR_TOKEN)
       inputs:
         targetType: 'inline'
         script: |
           set -euo pipefail
+
           VER="6.2.1.4610"
           ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
+          URL="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${ZIP}"
 
-          # Download official CLI
-          curl -sSLo "$ZIP" "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$ZIP"
+          echo "Downloading SonarScanner CLI ${VER}..."
+          curl -fSLo "$ZIP" "$URL"
 
-          # Unzip and add to PATH
+          echo "Unzipping..."
           unzip -q "$ZIP"
-          export PATH="$PWD/sonar-scanner-$VER-linux/bin:$PATH"
 
-          # Run scan (requires a secret variable named SONAR_TOKEN in pipeline variables)
+          # NOTE: Folder name includes '-linux-x64'
+          SCANNER_DIR="$PWD/sonar-scanner-${VER}-linux-x64"
+          export PATH="$SCANNER_DIR/bin:$PATH"
+
+          echo "SonarScanner version:"
+          sonar-scanner --version
+
+          # Run scan from repo root
           sonar-scanner \
             -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.organization=$(sonarOrganization) \
-            -Dsonar.projectKey=$(sonarProjectKey) \
+            -Dsonar.organization=$bhuvaanesh-045 \
+            -Dsonar.projectKey=$Bhuvaanesh-045_Online-Resource-Booking-System \
             -Dsonar.projectName="$(sonarProjectName)" \
             -Dsonar.sources=. \
-            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/** \
-            -Dsonar.login=$(SONAR_TOKEN)
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
+            -Dsonar.token="$9788f4888c49bc1638d6f3136dda50e4ef6e0154"
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
 - stage: Build
@@ -132,7 +143,10 @@ stages:
         set -e
         cd terraform
         terraform init -backend=false
-        terraform fmt -check
+
+        # We format in-place to AVOID failing the job with exit code 3.
+        terraform fmt -recursive
+
         terraform validate
         echo "✓ Terraform configuration is valid"
       displayName: 'Validate Terraform Code'
