@@ -87,12 +87,12 @@ stages:
 
           sonar-scanner \
             -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.organization="$bhuvaanesh-045" \
-            -Dsonar.projectKey="$Bhuvaanesh-045_Online-Resource-Booking-System" \
-            -Dsonar.projectName="$Online Resource Booking System" \
+            -Dsonar.organization="${bhuvaanesh-045}" \
+            -Dsonar.projectKey="${Bhuvaanesh-045_Online-Resource-Booking-System}" \
+            -Dsonar.projectName="${Online Resource Booking System}" \
             -Dsonar.sources=. \
             -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
-            -Dsonar.token="$9788f4888c49bc1638d6f3136dda50e4ef6e0154"
+            -Dsonar.token="${9788f4888c49bc1638d6f3136dda50e4ef6e0154}"
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
 - stage: Build
