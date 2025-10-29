@@ -4,7 +4,7 @@ trigger:
       - main
 
 variables:
-  # Azure resources
+  # ===== Azure resources =====
   acrName: 'campusbookingacr'
   resourceGroup: 'campusbookingrg'
   backendAppName: 'campus-booking-backend-api'
@@ -13,17 +13,18 @@ variables:
   # URL used to build the frontend
   backendUrl: 'https://campus-booking-backend-api.azurewebsites.net/api'
 
-  # Service connections
+  # ===== Service connections (only used in Deploy & Docker tasks) =====
   azureSubscription: 'azure-students-connection'
-  sonarServiceConnection: 'SonarCloudConnection'  # Project Settings > Service connections
+  # NOTE: We are NOT using a Sonar service connection; we use CLI + token.
 
-  # SonarCloud project info
-  sonarOrganization: 'YOUR_SONARCLOUD_ORG'
-  sonarProjectKey: 'campus-resource-booking'
-  sonarProjectName: 'Campus Resource Booking'
+  # ===== SonarCloud project info (CLI will use these) =====
+  sonarOrganization: 'bhuvaanesh-045'                # <--- set to your SonarCloud org key
+  sonarProjectKey: 'Bhuvaanesh-045_Online-Resource-Booking-System'  # <--- your project key
+  sonarProjectName: 'Online Resource Booking System'  # <--- your project name
 
 stages:
-# ========== STAGE 0: CODE SCAN (SonarCloud via CLI, no service connection) ==========
+
+# ========== STAGE 0: CODE SCAN (SonarCloud via CLI) ==========
 - stage: CodeScan
   displayName: 'Static Analysis: SonarCloud (CLI)'
   jobs:
@@ -33,49 +34,52 @@ stages:
       vmImage: 'ubuntu-latest'
     steps:
     - task: NodeTool@0
+      displayName: 'Use Node 20.x'
       inputs:
         versionSpec: '20.x'
-      displayName: 'Use Node 20.x'
 
-    # Build so the scanner sees sources (adjust if needed)
+    # Build backend so TS sources are emitted (if needed by your rules)
     - script: |
+        set -e
         cd backend
-        npm ci
+        npm ci --no-audit --no-fund
         npm run build
       displayName: 'Build backend (tsc)'
+
+    # Build frontend (optional for SAST but keeps parity)
     - script: |
+        set -e
         cd frontend
-        npm ci
+        npm ci --no-audit --no-fund
         npm run build
       displayName: 'Build frontend (tsc)'
 
     # Download and run SonarScanner CLI
     - task: Bash@3
-  displayName: 'Install & run SonarScanner (CLI)'
-  inputs:
-    targetType: 'inline'
-    script: |
-      set -euo pipefail
+      displayName: 'Install & run SonarScanner (CLI)'
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -euo pipefail
+          VER=5.0.1.3006
+          ZIP="sonar-scanner-$VER-linux.zip"
 
-      VER=5.0.1.3006
-      ZIP="sonar-scanner-$VER-linux.zip"
+          # Download official CLI
+          curl -sSLo "$ZIP" "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$ZIP"
 
-      # Download official CLI (correct URL)
-      curl -sSLo "$ZIP" "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$ZIP"
+          # Unzip and add to PATH
+          unzip -q "$ZIP"
+          export PATH="$PWD/sonar-scanner-$VER-linux/bin:$PATH"
 
-      # Unzip and add to PATH
-      unzip -q "$ZIP"
-      export PATH="$PWD/sonar-scanner-$VER-linux/bin:$PATH"
-
-      # Run scan (uses secret variable SONAR_TOKEN)
-      sonar-scanner \
-        -Dsonar.host.url=https://sonarcloud.io \
-        -Dsonar.organization=$bhuvaanesh-045 \
-        -Dsonar.projectKey=$Bhuvaanesh-045_Online-Resource-Booking-System \
-        -Dsonar.sources=. \
-        -Dsonar.login=$9788f4888c49bc1638d6f3136dda50e4ef6e0154
-
-
+          # Run scan (requires a secret variable named SONAR_TOKEN in pipeline variables)
+          sonar-scanner \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.organization=$(sonarOrganization) \
+            -Dsonar.projectKey=$(sonarProjectKey) \
+            -Dsonar.projectName="$(sonarProjectName)" \
+            -Dsonar.sources=. \
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/** \
+            -Dsonar.login=$(SONAR_TOKEN)
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
 - stage: Build
@@ -90,7 +94,7 @@ stages:
     - task: Docker@2
       displayName: 'Build and Push Backend'
       inputs:
-        containerRegistry: 'campusbookingacr-connection'
+        containerRegistry: 'campusbookingacr-connection'   # your ACR service connection
         repository: 'backend'
         command: 'buildAndPush'
         Dockerfile: 'backend/Dockerfile'
@@ -125,6 +129,7 @@ stages:
       inputs:
         terraformVersion: 'latest'
     - bash: |
+        set -e
         cd terraform
         terraform init -backend=false
         terraform fmt -check
@@ -161,7 +166,6 @@ stages:
               containers: '$(acrName).azurecr.io/frontend:$(Build.BuildId)'
 
 # ========== (OPTIONAL) STAGE 4: OWASP ZAP BASELINE ==========
-# Keep if you want the extra security artifact for the review. Safe to remove.
 - stage: ZapBaseline
   displayName: 'OWASP ZAP Baseline'
   dependsOn: Deploy
@@ -173,11 +177,12 @@ stages:
       vmImage: 'ubuntu-latest'
     steps:
     - script: |
+        set -e
         docker pull owasp/zap2docker-stable
         docker run --user root --rm \
           -v $(System.DefaultWorkingDirectory):/zap/wrk \
           owasp/zap2docker-stable zap-baseline.py \
-          -t https://campus-booking-frontend-web.azurewebsites.net \
+          -t https://$(frontendAppName).azurewebsites.net \
           -r zap_baseline_report.html \
           -x zap_baseline_report.xml \
           -m 5
