@@ -91,6 +91,7 @@ stages:
               -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
               -Dsonar.sources=. \
               -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
+              -Dsonar.scanner.skipJreProvisioning=true \
               -Dsonar.token="${SONAR_TOKEN}"
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
