@@ -50,21 +50,31 @@ stages:
       displayName: 'Build frontend (tsc)'
 
     # Download and run SonarScanner CLI
-    - bash: |
-        set -e
-        curl -sSLo scanner.zip https://get.sonarcloud.io/sonar-scanner-cli-linux.zip
-        unzip -q scanner.zip -d $(Agent.BuildDirectory)
-        SCANNER="$(Agent.BuildDirectory)"/sonar-scanner-*/bin/sonar-scanner
+    - task: Bash@3
+  displayName: 'Install & run SonarScanner (CLI)'
+  inputs:
+    targetType: 'inline'
+    script: |
+      set -euo pipefail
 
-        "$SCANNER" \
-          -Dsonar.host.url=https://sonarcloud.io \
-          -Dsonar.login=$9788f4888c49bc1638d6f3136dda50e4ef6e0154 \
-          -Dsonar.organization=bhuvaanesh-045 \
-          -Dsonar.projectKey=Bhuvaanesh-045_Online-Resource-Booking-System \
-          -Dsonar.projectName="Online Resource Booking System" \
-          -Dsonar.sources=backend,frontend \
-          -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**
-      displayName: 'Run SonarScanner'
+      VER=5.0.1.3006
+      ZIP="sonar-scanner-$VER-linux.zip"
+
+      # Download official CLI (correct URL)
+      curl -sSLo "$ZIP" "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/$ZIP"
+
+      # Unzip and add to PATH
+      unzip -q "$ZIP"
+      export PATH="$PWD/sonar-scanner-$VER-linux/bin:$PATH"
+
+      # Run scan (uses secret variable SONAR_TOKEN)
+      sonar-scanner \
+        -Dsonar.host.url=https://sonarcloud.io \
+        -Dsonar.organization=$bhuvaanesh-045 \
+        -Dsonar.projectKey=$Bhuvaanesh-045_Online-Resource-Booking-System \
+        -Dsonar.sources=. \
+        -Dsonar.login=$9788f4888c49bc1638d6f3136dda50e4ef6e0154
+
 
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
