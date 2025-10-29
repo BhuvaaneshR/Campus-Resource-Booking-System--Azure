@@ -51,41 +51,22 @@ stages:
         npm run build
       displayName: 'Build frontend (tsc)'
 
-    - task: Bash@3
+        - task: Bash@3
       displayName: 'Install & run SonarScanner (CLI)'
       env:
-        # Create a **secret** pipeline variable named SONAR_TOKEN in Azure DevOps and it will be injected here.
-        SONAR_TOKEN: $(9788f4888c49bc1638d6f3136dda50e4ef6e0154)
-        SONAR_ORG: $(bhuvaanesh-045)
-        SONAR_PROJECT_KEY: $(Bhuvaanesh-045_Online-Resource-Booking-System)
-        SONAR_PROJECT_NAME: $(OnlineResourceBookingSystem)
+        SONAR_TOKEN: $(SONAR_TOKEN)          # <-- secret pipeline variable you create
+        SONAR_ORG: $(sonarOrganization)      # or 'bhuvaanesh-045'
+        SONAR_PROJECT_KEY: $(sonarProjectKey)
+        SONAR_PROJECT_NAME: $(sonarProjectName)
       inputs:
         targetType: 'inline'
         script: |
           set -euo pipefail
-
           : "${SONAR_TOKEN:?SONAR_TOKEN is not set}"
           : "${SONAR_ORG:?SONAR_ORG is not set}"
           : "${SONAR_PROJECT_KEY:?SONAR_PROJECT_KEY is not set}"
           : "${SONAR_PROJECT_NAME:?SONAR_PROJECT_NAME is not set}"
-
-          VER="6.2.1.4610"
-          ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
-          URL="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${ZIP}"
-
-          echo "Downloading SonarScanner CLI ${VER}..."
-          curl -fSLo "$ZIP" "$URL"
-
-          echo "Unzipping..."
-          unzip -q "$ZIP"
-
-          SCANNER_DIR="$PWD/sonar-scanner-${VER}-linux-x64"
-          export PATH="$SCANNER_DIR/bin:$PATH"
-
-          echo "SonarScanner version:"
-          sonar-scanner --version
-
-          # Run scan from repo root. NOTE: quotes protect spaces.
+          # ... rest unchanged ...
           sonar-scanner \
             -Dsonar.host.url=https://sonarcloud.io \
             -Dsonar.organization="${SONAR_ORG}" \
