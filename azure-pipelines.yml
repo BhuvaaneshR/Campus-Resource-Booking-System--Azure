@@ -5,22 +5,27 @@ trigger:
 
 # ================== VARIABLES ==================
 variables:
-# 1) Bring in your Library > Variable Group
-- group: CampusResourceBookingVariableGroup   # contains SONAR_TOKEN, sonarOrganization, sonarProjectKey, sonarProjectName
+  # 1) Bring in your Library > Variable Group
+  - group: CampusResourceBookingVariableGroup   # SONAR_TOKEN (secret), sonarOrganization, sonarProjectKey, sonarProjectName
 
-# 2) Regular name/value vars for infra & CI/CD
-- name: acrName
-  value: 'campusbookingacr'
-- name: resourceGroup
-  value: 'campusbookingrg'
-- name: backendAppName
-  value: 'campus-booking-backend-api'
-- name: frontendAppName
-  value: 'campus-booking-frontend-web'
-- name: backendUrl
-  value: 'https://campus-booking-backend-api.azurewebsites.net/api'
-- name: azureSubscription
-  value: 'azure-students-connection'
+  # 2) Regular name/value vars for infra & CI/CD
+  - name: acrName
+    value: 'campusbookingacr'
+  - name: resourceGroup
+    value: 'campusbookingrg'
+  - name: backendAppName
+    value: 'campus-booking-backend-api'
+  - name: frontendAppName
+    value: 'campus-booking-frontend-web'
+  - name: backendUrl
+    value: 'https://campus-booking-backend-api.azurewebsites.net/api'
+  - name: azureSubscription
+    value: 'azure-students-connection'
+
+  # (Optional) set SCANNER_VER to force a specific SonarScanner version, e.g. '5.0.1.3006'
+  # If unset, we'll default to 6.2.1.4610.
+  # - name: SCANNER_VER
+  #   value: '5.0.1.3006'
 
 # ================== STAGES ==================
 stages:
@@ -60,6 +65,7 @@ stages:
           SONAR_ORG: $(sonarOrganization)          # from Variable Group
           SONAR_PROJECT_KEY: $(sonarProjectKey)    # from Variable Group
           SONAR_PROJECT_NAME: $(sonarProjectName)  # from Variable Group
+          SCANNER_VER: $(SCANNER_VER)              # optional override
         inputs:
           targetType: 'inline'
           script: |
@@ -69,23 +75,36 @@ stages:
             : "${SONAR_PROJECT_KEY:?SONAR_PROJECT_KEY is not set}"
             : "${SONAR_PROJECT_NAME:?SONAR_PROJECT_NAME is not set}"
 
-            # Pin to 5.0.1 to avoid server-managed engine 403s
-            VER="5.0.1.3006"
-            ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
-            URL="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${ZIP}"
+            # ----- Version selection & URL patterns (5.x vs 6.x differ) -----
+            VER="${SCANNER_VER:-6.2.1.4610}"
+            if [[ "$VER" == 5.* ]]; then
+              ZIP="sonar-scanner-cli-${VER}-linux.zip"
+              DIR="sonar-scanner-${VER}-linux"
+            else
+              ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
+              DIR="sonar-scanner-${VER}-linux-x64"
+            fi
+
+            URL_PRIMARY="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${ZIP}"
+            URL_FALLBACK="https://get.sonarsource.org/sonar-scanner-cli/${ZIP}"
 
             echo "Downloading SonarScanner CLI ${VER}..."
-            curl -fSLo "$ZIP" "$URL"
+            if ! curl -fsSLo "$ZIP" "$URL_PRIMARY"; then
+              echo "Primary download failed; trying fallback..."
+              curl -fsSLo "$ZIP" "$URL_FALLBACK"
+            fi
 
             echo "Unzipping..."
             unzip -q "$ZIP"
 
-            SCANNER_DIR="$PWD/sonar-scanner-${VER}-linux-x64"
+            SCANNER_DIR="$PWD/${DIR}"
             export PATH="$SCANNER_DIR/bin:$PATH"
 
             echo "SonarScanner version:"
             sonar-scanner --version
 
+            # If you ever see a 403 on 'analysis/engine' with 6.x,
+            # you may try adding: -Dsonar.scanner.skipJreProvisioning=true
             sonar-scanner \
               -Dsonar.host.url=https://sonarcloud.io \
               -Dsonar.organization="${SONAR_ORG}" \
