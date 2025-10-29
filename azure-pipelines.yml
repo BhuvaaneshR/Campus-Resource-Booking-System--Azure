@@ -4,23 +4,22 @@ trigger:
       - main
 
 variables:
-  # ===== Azure resources =====
+  # ===== Azure resources (EDIT IF NEEDED) =====
   acrName: 'campusbookingacr'
   resourceGroup: 'campusbookingrg'
   backendAppName: 'campus-booking-backend-api'
   frontendAppName: 'campus-booking-frontend-web'
 
-  # URL used to build the frontend
+  # URL used to build the frontend (EDIT IF YOUR API URL DIFFERS)
   backendUrl: 'https://campus-booking-backend-api.azurewebsites.net/api'
 
-  # ===== Service connections =====
+  # ===== Service connections (EDIT IF YOUR NAME DIFFERS) =====
   azureSubscription: 'azure-students-connection'
-  # Sonar uses CLI + token variable; no service connection needed.
 
-  # ===== SonarCloud project info =====
-  sonarOrganization: 'bhuvaanesh-045'
-  sonarProjectKey: 'Bhuvaanesh-045_Online-Resource-Booking-System'
-  sonarProjectName: 'Online Resource Booking System'
+  # ===== SonarCloud project info (EDIT TO MATCH SONARCLOUD) =====
+  sonarOrganization: 'bhuvaanesh-045'                         # e.g., your SonarCloud org key
+  sonarProjectKey: 'Bhuvaanesh-045_Online-Resource-Booking-System'  # exact Project Key
+  sonarProjectName: 'Online Resource Booking System'                # display name (can have spaces)
 
 stages:
 
@@ -55,10 +54,11 @@ stages:
     - task: Bash@3
       displayName: 'Install & run SonarScanner (CLI)'
       env:
-        SONAR_TOKEN: $(SONAR_TOKEN)                # create as secret pipeline var
-        SONAR_ORG: $(sonarOrganization)
-        SONAR_PROJECT_KEY: $(sonarProjectKey)
-        SONAR_PROJECT_NAME: $(sonarProjectName)
+        # Create a **secret** pipeline variable named SONAR_TOKEN in Azure DevOps and it will be injected here.
+        SONAR_TOKEN: $(9788f4888c49bc1638d6f3136dda50e4ef6e0154)
+        SONAR_ORG: $(bhuvaanesh-045)
+        SONAR_PROJECT_KEY: $(Bhuvaanesh-045_Online-Resource-Booking-System)
+        SONAR_PROJECT_NAME: $(OnlineResourceBookingSystem)
       inputs:
         targetType: 'inline'
         script: |
@@ -85,14 +85,15 @@ stages:
           echo "SonarScanner version:"
           sonar-scanner --version
 
+          # Run scan from repo root. NOTE: quotes protect spaces.
           sonar-scanner \
             -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.organization="${bhuvaanesh-045}" \
-            -Dsonar.projectKey="${Bhuvaanesh-045_Online-Resource-Booking-System}" \
-            -Dsonar.projectName="${Online Resource Booking System}" \
+            -Dsonar.organization="${SONAR_ORG}" \
+            -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
+            -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
             -Dsonar.sources=. \
             -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
-            -Dsonar.token="${9788f4888c49bc1638d6f3136dda50e4ef6e0154}"
+            -Dsonar.token="${SONAR_TOKEN}"
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
 - stage: Build
@@ -107,7 +108,7 @@ stages:
     - task: Docker@2
       displayName: 'Build and Push Backend'
       inputs:
-        containerRegistry: 'campusbookingacr-connection'
+        containerRegistry: 'campusbookingacr-connection'   # EDIT if your ACR service connection name differs
         repository: 'backend'
         command: 'buildAndPush'
         Dockerfile: 'backend/Dockerfile'
@@ -120,7 +121,7 @@ stages:
     - task: Docker@2
       displayName: 'Build and Push Frontend'
       inputs:
-        containerRegistry: 'campusbookingacr-connection'
+        containerRegistry: 'campusbookingacr-connection'    # EDIT if needed
         repository: 'frontend'
         command: 'buildAndPush'
         Dockerfile: 'frontend/Dockerfile'
@@ -145,7 +146,7 @@ stages:
         set -e
         cd terraform
         terraform init -backend=false
-        terraform fmt -recursive
+        terraform fmt -recursive   # format files instead of failing with exit code 3
         terraform validate
         echo "✓ Terraform configuration is valid"
       displayName: 'Validate Terraform Code'
