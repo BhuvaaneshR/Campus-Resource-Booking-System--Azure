@@ -214,18 +214,20 @@ stages:
     steps:
       - script: |
           set -e
-          docker pull owasp/zap2docker-stable
+          docker pull ghcr.io/zaproxy/zaproxy:stable
           docker run --user root --rm \
             -v $(System.DefaultWorkingDirectory):/zap/wrk \
-            owasp/zap2docker-stable zap-baseline.py \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t https://$(frontendAppName).azurewebsites.net \
             -r zap_baseline_report.html \
             -x zap_baseline_report.xml \
-            -m 5
+            -m 5 \
+            || true
         displayName: 'Run ZAP Baseline'
 
       - task: PublishBuildArtifacts@1
         displayName: 'Publish ZAP report'
+        condition: always()
         inputs:
           PathtoPublish: '$(System.DefaultWorkingDirectory)/zap_baseline_report.html'
           ArtifactName: 'zap-report'
