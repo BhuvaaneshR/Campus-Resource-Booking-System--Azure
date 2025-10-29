@@ -38,12 +38,12 @@ resource "azurerm_mssql_server" "sqlserver" {
   location                     = azurerm_resource_group.rg.location
   version                      = "12.0"
   administrator_login          = "campusbookingserver"
-  administrator_login_password = "Campusresourcebooking@220701045" 
+  administrator_login_password = "Campusresourcebooking@220701045"
 
   identity {
     type = "SystemAssigned"
   }
-  
+
   tags = {
     Owner = "220701045@rajalakshmi.edu.in"
   }
@@ -77,10 +77,10 @@ resource "azurerm_linux_web_app" "backend" {
   app_settings = {
     "DB_DATABASE"                         = "campusbookingdb"
     "DB_ENCRYPT"                          = "true"
-    "DB_PASSWORD"                         = "Campusresourcebooking@220701045" 
+    "DB_PASSWORD"                         = "Campusresourcebooking@220701045"
     "DB_SERVER"                           = "campusbookingserver.database.windows.net"
     "DB_USERNAME"                         = "campusbookingserver"
-    "JWT_SECRET"                          = "6d90f5be37b4659689c3ccc62fc82482" 
+    "JWT_SECRET"                          = "6d90f5be37b4659689c3ccc62fc82482"
     "NODE_ENV"                            = "production"
     "PORT"                                = "8080"
     "AZURE_APP_SERVICE_URL"               = "https://campus-booking-frontend-web.azurewebsites.net"
@@ -106,7 +106,7 @@ resource "azurerm_linux_web_app" "frontend" {
     "REACT_APP_API_URL"                   = "https://campus-booking-backend-api.azurewebsites.net/api"
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
   }
-  
+
   site_config {
     always_on     = false
     ftps_state    = "FtpsOnly"
@@ -114,17 +114,17 @@ resource "azurerm_linux_web_app" "frontend" {
   }
 }
 output "backend_url" {
-  value = "https://${azurerm_linux_web_app.backend.default_hostname}"
+  value       = "https://${azurerm_linux_web_app.backend.default_hostname}"
   description = "Backend API URL"
 }
 
 output "frontend_url" {
-  value = "https://${azurerm_linux_web_app.frontend.default_hostname}"
+  value       = "https://${azurerm_linux_web_app.frontend.default_hostname}"
   description = "Frontend Web App URL"
 }
 
 output "acr_login_server" {
-  value = azurerm_container_registry.acr.login_server
+  value       = azurerm_container_registry.acr.login_server
   description = "Container Registry URL"
 }
 # 8. Define AKS Cluster
