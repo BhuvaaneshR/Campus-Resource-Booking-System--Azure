@@ -22,184 +22,271 @@ variables:
   - name: azureSubscription
     value: 'azure-students-connection'
   - name: SCANNER_VER
-    value: '6.2.1.4610'  
-
-  # (Optional) set SCANNER_VER to force a specific SonarScanner version, e.g. '5.0.1.3006'
-  # If unset, we'll default to 6.2.1.4610.
+    value: '6.2.1.4610'
+  # (Optional) to pin old scanner you can flip to:
   # - name: SCANNER_VER
   #   value: '5.0.1.3006'
 
 # ================== STAGES ==================
 stages:
 
-# ========== STAGE 0: CODE SCAN (SonarCloud via CLI) ==========
+# ========== STAGE 0: CODE SCAN (SAST + secrets + SonarCloud) ==========
 - stage: CodeScan
-  displayName: 'Static Analysis: SonarCloud (CLI)'
+  displayName: 'Static & Secrets Analysis'
   jobs:
-  - job: SonarCLI
-    displayName: 'Run SonarScanner CLI'
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-      - task: NodeTool@0
-        displayName: 'Use Node 20.x'
-        inputs:
-          versionSpec: '20.x'
+    - job: SonarCLI
+      displayName: 'Run SAST, Secrets, and SonarCloud'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - task: NodeTool@0
+          displayName: 'Use Node 20.x'
+          inputs:
+            versionSpec: '20.x'
 
-      - script: |
-          set -e
-          cd backend
-          npm ci --no-audit --no-fund
-          npm run build
-        displayName: 'Build backend (tsc)'
+        # ---- Build (so analyzers see real TS outputs if needed) ----
+        - script: |
+            set -e
+            cd backend
+            npm ci --no-audit --no-fund
+            npm run build
+          displayName: 'Build backend (tsc)'
 
-      - script: |
-          set -e
-          cd frontend
-          npm ci --no-audit --no-fund
-          npm run build
-        displayName: 'Build frontend (tsc)'
+        - script: |
+            set -e
+            cd frontend
+            npm ci --no-audit --no-fund
+            npm run build
+          displayName: 'Build frontend (tsc)'
 
-      - task: Bash@3
-        displayName: 'Install & run SonarScanner (CLI)'
-        env:
-          SONAR_TOKEN: $(SONAR_TOKEN)              # from Variable Group (secret)
-          SONAR_ORG: $(sonarOrganization)          # from Variable Group
-          SONAR_PROJECT_KEY: $(sonarProjectKey)    # from Variable Group
-          SONAR_PROJECT_NAME: $(sonarProjectName)  # from Variable Group
-          SCANNER_VER: $(SCANNER_VER)              # optional override
-        inputs:
-          targetType: 'inline'
-          script: |
-            set -euo pipefail
-            : "${SONAR_TOKEN:?SONAR_TOKEN is not set}"
-            : "${SONAR_ORG:?SONAR_ORG is not set}"
-            : "${SONAR_PROJECT_KEY:?SONAR_PROJECT_KEY is not set}"
-            : "${SONAR_PROJECT_NAME:?SONAR_PROJECT_NAME is not set}"
+        # ---- Dependency audit (soft fail first) ----
+        - script: |
+            set -e
+            cd backend
+            npm audit --audit-level=high || true
+            cd ../frontend
+            npm audit --audit-level=high || true
+          displayName: 'Dependency audit (npm) — soft fail'
 
-            # ----- Version selection & URL patterns (5.x vs 6.x differ) -----
-            VER="${SCANNER_VER:-6.2.1.4610}"
-            if [[ "$VER" == 5.* ]]; then
-              ZIP="sonar-scanner-cli-${VER}-linux.zip"
-              DIR="sonar-scanner-${VER}-linux"
-            else
-              ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
-              DIR="sonar-scanner-${VER}-linux-x64"
-            fi
+        # ---- Gitleaks (secrets scanning) ----
+        - script: |
+            set -e
+            curl -sSL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash
+            ./gitleaks detect --no-banner --redact --exit-code 1
+          displayName: 'Gitleaks (secrets scan)'
 
-            URL_PRIMARY="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${ZIP}"
-            URL_FALLBACK="https://get.sonarsource.org/sonar-scanner-cli/${ZIP}"
+        # ---- SonarCloud via CLI ----
+        - task: Bash@3
+          displayName: 'Install & run SonarScanner (CLI)'
+          env:
+            SONAR_TOKEN: $(SONAR_TOKEN)             # from Variable Group (secret)
+            SONAR_ORG: $(sonarOrganization)         # from Variable Group
+            SONAR_PROJECT_KEY: $(sonarProjectKey)   # from Variable Group
+            SONAR_PROJECT_NAME: $(sonarProjectName) # from Variable Group
+            SCANNER_VER: $(SCANNER_VER)             # optional override
+          inputs:
+            targetType: 'inline'
+            script: |
+              set -euo pipefail
+              : "${SONAR_TOKEN:?SONAR_TOKEN is not set}"
+              : "${SONAR_ORG:?SONAR_ORG is not set}"
+              : "${SONAR_PROJECT_KEY:?SONAR_PROJECT_KEY is not set}"
+              : "${SONAR_PROJECT_NAME:?SONAR_PROJECT_NAME is not set}"
 
-            echo "Downloading SonarScanner CLI ${VER}..."
-            if ! curl -fsSLo "$ZIP" "$URL_PRIMARY"; then
-              echo "Primary download failed; trying fallback..."
-              curl -fsSLo "$ZIP" "$URL_FALLBACK"
-            fi
+              # ----- Version selection & URL patterns (5.x vs 6.x differ) -----
+              VER="${SCANNER_VER:-6.2.1.4610}"
+              if [[ "$VER" == 5.* ]]; then
+                ZIP="sonar-scanner-cli-${VER}-linux.zip"
+                DIR="sonar-scanner-${VER}-linux"
+              else
+                ZIP="sonar-scanner-cli-${VER}-linux-x64.zip"
+                DIR="sonar-scanner-${VER}-linux-x64"
+              fi
 
-            echo "Unzipping..."
-            unzip -q "$ZIP"
+              URL_PRIMARY="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${ZIP}"
+              URL_FALLBACK="https://get.sonarsource.org/sonar-scanner-cli/${ZIP}"
 
-            SCANNER_DIR="$PWD/${DIR}"
-            export PATH="$SCANNER_DIR/bin:$PATH"
+              echo "Downloading SonarScanner CLI ${VER}..."
+              if ! curl -fsSLo "$ZIP" "$URL_PRIMARY"; then
+                echo "Primary download failed; trying fallback..."
+                curl -fsSLo "$ZIP" "$URL_FALLBACK"
+              fi
 
-            echo "SonarScanner version:"
-            sonar-scanner --version
+              echo "Unzipping..."
+              unzip -q "$ZIP"
 
-            # If you ever see a 403 on 'analysis/engine' with 6.x,
-            # you may try adding: -Dsonar.scanner.skipJreProvisioning=true
-            sonar-scanner \
-              -Dsonar.host.url=https://sonarcloud.io \
-              -Dsonar.organization="${SONAR_ORG}" \
-              -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
-              -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
-              -Dsonar.sources=. \
-              -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
-              -Dsonar.token="${SONAR_TOKEN}"
+              SCANNER_DIR="$PWD/${DIR}"
+              export PATH="$SCANNER_DIR/bin:$PATH"
+
+              echo "SonarScanner version:"
+              sonar-scanner --version
+
+              sonar-scanner \
+                -Dsonar.host.url=https://sonarcloud.io \
+                -Dsonar.organization="${SONAR_ORG}" \
+                -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
+                -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
+                -Dsonar.sources=. \
+                -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
+                -Dsonar.token="${SONAR_TOKEN}"
+
+        # ---- Enforce Sonar Quality Gate (poll a few times) ----
+        - task: Bash@3
+          displayName: 'Fail if Sonar Quality Gate fails'
+          env:
+            SONAR_TOKEN: $(SONAR_TOKEN)
+            SONAR_PROJECT_KEY: $(sonarProjectKey)
+          inputs:
+            targetType: 'inline'
+            script: |
+              set -euo pipefail
+              apt-get update -y >/dev/null 2>&1 || true
+              apt-get install -y jq >/dev/null 2>&1 || true
+
+              echo "Polling SonarCloud Quality Gate for project: ${SONAR_PROJECT_KEY}"
+              for i in {1..12}; do
+                RES=$(curl -s -u "${SONAR_TOKEN}:" \
+                  "https://sonarcloud.io/api/qualitygates/project_status?projectKey=${SONAR_PROJECT_KEY}" || true)
+                STATUS=$(echo "$RES" | jq -r '.projectStatus.status // empty')
+                if [[ -n "$STATUS" && "$STATUS" != "IN_PROGRESS" ]]; then
+                  echo "Quality Gate: $STATUS"
+                  [[ "$STATUS" == "OK" ]] && exit 0 || exit 1
+                fi
+                echo "Quality Gate still computing... retry $i"
+                sleep 10
+              done
+              echo "Quality Gate did not return a final status in time."
+              exit 1
 
 # ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
 - stage: Build
   displayName: 'Build and Push Images'
   dependsOn: CodeScan
   jobs:
-  - job: BuildAndPush
-    displayName: 'Build and Push to ACR'
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-      - task: Docker@2
-        displayName: 'Build and Push Backend'
-        inputs:
-          containerRegistry: 'campusbookingacr-connection'   # EDIT if your ACR service connection name differs
-          repository: 'backend'
-          command: 'buildAndPush'
-          Dockerfile: 'backend/Dockerfile'
-          tags: '$(Build.BuildId)'
+    - job: BuildAndPush
+      displayName: 'Build and Push to ACR'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - task: Docker@2
+          displayName: 'Build and Push Backend'
+          inputs:
+            containerRegistry: 'campusbookingacr-connection'   # EDIT if your ACR service connection name differs
+            repository: 'backend'
+            command: 'buildAndPush'
+            Dockerfile: 'backend/Dockerfile'
+            tags: '$(Build.BuildId)'
 
-      - script: |
-          echo "REACT_APP_API_URL=$(backendUrl)" > frontend/.env.production
-        displayName: 'Create Frontend .env file'
+        - script: |
+            echo "REACT_APP_API_URL=$(backendUrl)" > frontend/.env.production
+          displayName: 'Create Frontend .env file'
 
-      - task: Docker@2
-        displayName: 'Build and Push Frontend'
-        inputs:
-          containerRegistry: 'campusbookingacr-connection'    # EDIT if needed
-          repository: 'frontend'
-          command: 'buildAndPush'
-          Dockerfile: 'frontend/Dockerfile'
-          buildContext: 'frontend'
-          tags: '$(Build.BuildId)'
+        - task: Docker@2
+          displayName: 'Build and Push Frontend'
+          inputs:
+            containerRegistry: 'campusbookingacr-connection'    # EDIT if needed
+            repository: 'frontend'
+            command: 'buildAndPush'
+            Dockerfile: 'frontend/Dockerfile'
+            buildContext: 'frontend'
+            tags: '$(Build.BuildId)'
+
+# ========== STAGE 1.5: SCAN BUILT IMAGES (Trivy) ==========
+- stage: ScanImages
+  displayName: 'Scan container images (Trivy)'
+  dependsOn: Build
+  jobs:
+    - job: TrivyScan
+      displayName: 'Trivy vulnerability scan'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        # Ensure we're logged into ACR so Trivy/Docker can pull images
+        - task: Docker@2
+          displayName: 'Docker login to ACR'
+          inputs:
+            containerRegistry: 'campusbookingacr-connection'
+            command: 'login'
+
+        - script: |
+            set -e
+            curl -sL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
+            ./bin/trivy --version
+            ./bin/trivy image --exit-code 1 --severity HIGH,CRITICAL $(acrName).azurecr.io/backend:$(Build.BuildId)
+            ./bin/trivy image --exit-code 1 --severity HIGH,CRITICAL $(acrName).azurecr.io/frontend:$(Build.BuildId)
+          displayName: 'Trivy scan images (fail on HIGH/CRITICAL)'
 
 # ========== STAGE 2: TERRAFORM VALIDATION ==========
 - stage: TerraformValidate
   displayName: 'Validate Terraform Configuration'
   dependsOn: []
   jobs:
-  - job: Validate
-    displayName: 'Terraform Validation'
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-      - task: TerraformInstaller@0
-        displayName: 'Install Terraform'
-        inputs:
-          terraformVersion: 'latest'
+    - job: Validate
+      displayName: 'Terraform Validation'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - task: TerraformInstaller@0
+          displayName: 'Install Terraform'
+          inputs:
+            terraformVersion: 'latest'
 
-      - bash: |
-          set -e
-          cd terraform
-          terraform init -backend=false
-          terraform fmt -recursive
-          terraform validate
-          echo "✓ Terraform configuration is valid"
-        displayName: 'Validate Terraform Code'
+        - bash: |
+            set -e
+            cd terraform
+            terraform init -backend=false
+            terraform fmt -recursive
+            terraform validate
+            echo "✓ Terraform configuration is valid"
+          displayName: 'Validate Terraform Code'
+
+# ========== STAGE 2.5: IaC Security (tfsec) ==========
+- stage: IaCSecurity
+  displayName: 'IaC Security (tfsec)'
+  dependsOn: []
+  jobs:
+    - job: Tfsec
+      displayName: 'tfsec scan'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - script: |
+            set -e
+            curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+            ./tfsec ./terraform --soft-fail
+          displayName: 'tfsec scan (soft fail first)'
 
 # ========== STAGE 3: DEPLOY APPS ==========
 - stage: Deploy
   displayName: 'Deploy Applications'
-  dependsOn: Build
+  dependsOn:
+    - Build
+    - ScanImages
+    - IaCSecurity
+    - CodeScan
   jobs:
-  - deployment: DeployProduction
-    displayName: 'Deploy to Production'
-    pool:
-      vmImage: 'ubuntu-latest'
-    environment: 'production'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-            - task: AzureWebAppContainer@1
-              displayName: 'Deploy Backend App'
-              inputs:
-                azureSubscription: $(azureSubscription)
-                appName: $(backendAppName)
-                containers: '$(acrName).azurecr.io/backend:$(Build.BuildId)'
+    - deployment: DeployProduction
+      displayName: 'Deploy to Production'
+      pool:
+        vmImage: 'ubuntu-latest'
+      environment: 'production'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - task: AzureWebAppContainer@1
+                displayName: 'Deploy Backend App'
+                inputs:
+                  azureSubscription: $(azureSubscription)
+                  appName: $(backendAppName)
+                  containers: '$(acrName).azurecr.io/backend:$(Build.BuildId)'
 
-            - task: AzureWebAppContainer@1
-              displayName: 'Deploy Frontend App'
-              inputs:
-                azureSubscription: $(azureSubscription)
-                appName: $(frontendAppName)
-                containers: '$(acrName).azurecr.io/frontend:$(Build.BuildId)'
+              - task: AzureWebAppContainer@1
+                displayName: 'Deploy Frontend App'
+                inputs:
+                  azureSubscription: $(azureSubscription)
+                  appName: $(frontendAppName)
+                  containers: '$(acrName).azurecr.io/frontend:$(Build.BuildId)'
 
 # ========== (OPTIONAL) STAGE 4: OWASP ZAP BASELINE ==========
 - stage: ZapBaseline
@@ -207,27 +294,46 @@ stages:
   dependsOn: Deploy
   condition: succeeded()
   jobs:
-  - job: Zap
-    displayName: 'Run ZAP against Frontend'
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-      - script: |
-          set -e
-          docker pull ghcr.io/zaproxy/zaproxy:stable
-          docker run --user root --rm \
-            -v $(System.DefaultWorkingDirectory):/zap/wrk \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t https://$(frontendAppName).azurewebsites.net \
-            -r zap_baseline_report.html \
-            -x zap_baseline_report.xml \
-            -m 5 \
-            || true
-        displayName: 'Run ZAP Baseline'
+    - job: Zap
+      displayName: 'Run ZAP against Frontend'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - script: |
+            set -e
+            docker pull ghcr.io/zaproxy/zaproxy:stable
+            docker run --user root --rm \
+              -v $(System.DefaultWorkingDirectory):/zap/wrk \
+              ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+              -t https://$(frontendAppName).azurewebsites.net \
+              -r zap_baseline_report.html \
+              -x zap_baseline_report.xml \
+              -m 5 \
+              || true
+          displayName: 'ZAP Baseline (passive)'
 
-      - task: PublishBuildArtifacts@1
-        displayName: 'Publish ZAP report'
-        condition: always()
-        inputs:
-          PathtoPublish: '$(System.DefaultWorkingDirectory)/zap_baseline_report.html'
-          ArtifactName: 'zap-report'
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish ZAP report'
+          condition: always()
+          inputs:
+            PathtoPublish: '$(System.DefaultWorkingDirectory)/zap_baseline_report.html'
+            ArtifactName: 'zap-report'
+
+# OPTIONAL: ZAP Full Scan against STAGING (uncomment after you have a staging slot/app)
+# - stage: ZapFull
+#   displayName: 'OWASP ZAP Full Scan (staging)'
+#   dependsOn: Deploy
+#   condition: succeeded()
+#   jobs:
+#     - job: ZapActive
+#       pool:
+#         vmImage: 'ubuntu-latest'
+#       steps:
+#         - script: |
+#             set -e
+#             docker pull ghcr.io/zaproxy/zaproxy:stable
+#             docker run --rm -v $(System.DefaultWorkingDirectory):/zap/wrk \
+#               ghcr.io/zaproxy/zaproxy:stable zap-full-scan.py \
+#               -t https://staging-$(frontendAppName).azurewebsites.net \
+#               -r zap_full_report.html -m 10
+#           displayName: 'ZAP Full Scan (active) — staging'
