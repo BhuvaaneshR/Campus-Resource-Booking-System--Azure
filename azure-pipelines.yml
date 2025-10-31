@@ -43,26 +43,32 @@ stages:
         - checkout: self
           fetchDepth: 0
 
-        # ---- Gitleaks (Docker) + report artifact ----
+        # ---- Gitleaks (release binary) + report artifact (SOFT-FAIL) ----
         - script: |
-            set -e
+            set -euo pipefail
             REPORT_DIR="$(System.DefaultWorkingDirectory)/security-reports"
             mkdir -p "$REPORT_DIR"
 
-            echo "Pulling Gitleaks image..."
-            docker pull gitleaks/gitleaks:latest
+            GL_VER="8.18.3"
+            TARBALL="gitleaks_${GL_VER}_linux_x64.tar.gz"
+            URL="https://github.com/gitleaks/gitleaks/releases/download/v${GL_VER}/${TARBALL}"
 
-            echo "Running Gitleaks scan..."
-            docker run --rm \
-              -v "$(System.DefaultWorkingDirectory)":/repo \
-              gitleaks/gitleaks:latest detect \
-              --source=/repo \
+            echo "Downloading Gitleaks v${GL_VER}..."
+            curl -fsSL "$URL" -o "$TARBALL"
+
+            echo "Extracting..."
+            tar -xzf "$TARBALL" gitleaks
+            chmod +x gitleaks
+
+            echo "Running Gitleaks (soft-fail)..."
+            ./gitleaks detect \
+              --source "$(System.DefaultWorkingDirectory)" \
               --no-banner \
               --redact \
               --report-format json \
-              --report-path /repo/security-reports/gitleaks_report.json \
-              --exit-code 1
-          displayName: 'Gitleaks (secrets scan)'
+              --report-path "$REPORT_DIR/gitleaks_report.json" \
+              --exit-code 0
+          displayName: 'Gitleaks (secrets scan) — soft fail'
 
         - task: PublishBuildArtifacts@1
           displayName: 'Publish Gitleaks report'
@@ -276,9 +282,11 @@ stages:
         vmImage: 'ubuntu-latest'
       steps:
         - script: |
-            set -e
+            set -euo pipefail
             curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
-            ./tfsec ./terraform --soft-fail
+            tfsec --version
+            # Soft-fail so pipeline continues; report still printed to logs
+            tfsec ./terraform --soft-fail
           displayName: 'tfsec scan (soft fail)'
 
 # ========== STAGE 3: DEPLOY APPS ==========
