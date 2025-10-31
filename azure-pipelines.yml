@@ -34,17 +34,50 @@ stages:
 - stage: CodeScan
   displayName: 'Static & Secrets Analysis'
   jobs:
-    - job: SonarCLI
-      displayName: 'Run SAST, Secrets, and SonarCloud'
+    - job: CodeQuality
+      displayName: 'Secrets + Dependencies + SonarCloud'
       pool:
         vmImage: 'ubuntu-latest'
       steps:
+        # Ensure full history so Gitleaks can scan properly
+        - checkout: self
+          fetchDepth: 0
+
+        # ---- Gitleaks (Docker) + report artifact ----
+        - script: |
+            set -e
+            REPORT_DIR="$(System.DefaultWorkingDirectory)/security-reports"
+            mkdir -p "$REPORT_DIR"
+
+            echo "Pulling Gitleaks image..."
+            docker pull gitleaks/gitleaks:latest
+
+            echo "Running Gitleaks scan..."
+            docker run --rm \
+              -v "$(System.DefaultWorkingDirectory)":/repo \
+              gitleaks/gitleaks:latest detect \
+              --source=/repo \
+              --no-banner \
+              --redact \
+              --report-format json \
+              --report-path /repo/security-reports/gitleaks_report.json \
+              --exit-code 1
+          displayName: 'Gitleaks (secrets scan)'
+
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Gitleaks report'
+          condition: always()
+          inputs:
+            PathtoPublish: '$(System.DefaultWorkingDirectory)/security-reports'
+            ArtifactName: 'security-reports'
+
+        # ---- Node setup ----
         - task: NodeTool@0
           displayName: 'Use Node 20.x'
           inputs:
             versionSpec: '20.x'
 
-        # ---- Build (so analyzers see real TS outputs if needed) ----
+        # ---- Build (so analyzers see TS outputs if needed) ----
         - script: |
             set -e
             cd backend
@@ -59,7 +92,7 @@ stages:
             npm run build
           displayName: 'Build frontend (tsc)'
 
-        # ---- Dependency audit (soft fail first) ----
+        # ---- Dependency audit (soft fail) ----
         - script: |
             set -e
             cd backend
@@ -67,13 +100,6 @@ stages:
             cd ../frontend
             npm audit --audit-level=high || true
           displayName: 'Dependency audit (npm) — soft fail'
-
-        # ---- Gitleaks (secrets scanning) ----
-        - script: |
-            set -e
-            curl -sSL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | bash
-            ./gitleaks detect --no-banner --redact --exit-code 1
-          displayName: 'Gitleaks (secrets scan)'
 
         # ---- SonarCloud via CLI ----
         - task: Bash@3
@@ -130,7 +156,7 @@ stages:
                 -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
                 -Dsonar.token="${SONAR_TOKEN}"
 
-        # ---- Enforce Sonar Quality Gate (poll a few times) ----
+        # ---- Enforce Sonar Quality Gate (poll for result) ----
         - task: Bash@3
           displayName: 'Fail if Sonar Quality Gate fails'
           env:
@@ -201,7 +227,6 @@ stages:
       pool:
         vmImage: 'ubuntu-latest'
       steps:
-        # Ensure we're logged into ACR so Trivy/Docker can pull images
         - task: Docker@2
           displayName: 'Docker login to ACR'
           inputs:
@@ -254,7 +279,7 @@ stages:
             set -e
             curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
             ./tfsec ./terraform --soft-fail
-          displayName: 'tfsec scan (soft fail first)'
+          displayName: 'tfsec scan (soft fail)'
 
 # ========== STAGE 3: DEPLOY APPS ==========
 - stage: Deploy
@@ -318,22 +343,3 @@ stages:
           inputs:
             PathtoPublish: '$(System.DefaultWorkingDirectory)/zap_baseline_report.html'
             ArtifactName: 'zap-report'
-
-# OPTIONAL: ZAP Full Scan against STAGING (uncomment after you have a staging slot/app)
-# - stage: ZapFull
-#   displayName: 'OWASP ZAP Full Scan (staging)'
-#   dependsOn: Deploy
-#   condition: succeeded()
-#   jobs:
-#     - job: ZapActive
-#       pool:
-#         vmImage: 'ubuntu-latest'
-#       steps:
-#         - script: |
-#             set -e
-#             docker pull ghcr.io/zaproxy/zaproxy:stable
-#             docker run --rm -v $(System.DefaultWorkingDirectory):/zap/wrk \
-#               ghcr.io/zaproxy/zaproxy:stable zap-full-scan.py \
-#               -t https://staging-$(frontendAppName).azurewebsites.net \
-#               -r zap_full_report.html -m 10
-#           displayName: 'ZAP Full Scan (active) — staging'
