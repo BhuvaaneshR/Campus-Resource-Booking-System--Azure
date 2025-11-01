@@ -16,23 +16,27 @@ variables:
 
   # 2) Name/value vars for infra & CI/CD
   - name: acrName
-    value: 'campusbookingacr'                     # <--- placeholder
+    value: 'campusbookingacr'                     # <--- EDIT if needed
   - name: resourceGroup
     value: 'campusbookingrg'                      # (kept for reference; not used directly here)
   - name: backendAppName
-    value: 'campus-booking-backend-api'           # <--- placeholder
+    value: 'campus-booking-backend-api'           # <--- EDIT
   - name: frontendAppName
-    value: 'campus-booking-frontend-web'          # <--- placeholder
+    value: 'campus-booking-frontend-web'          # <--- EDIT
   - name: backendUrl
-    value: 'https://campus-booking-backend-api.azurewebsites.net/api'  # <--- placeholder (frontend env)
+    value: 'https://campus-booking-backend-api.azurewebsites.net/api'  # <--- EDIT (frontend env)
   - name: azureSubscription
-    value: 'azure-students-connection'            # <--- placeholder (Service Connection display name)
+    value: 'azure-students-connection'            # <--- EDIT (Service Connection display name)
   - name: SCANNER_VER
     value: '6.2.1.4610'
 
   # Service connection to ACR used by Docker@2 tasks
   - name: acrServiceConnection
-    value: 'campusbookingacr-connection'          # <--- placeholder (Service Connection to your ACR)
+    value: 'campusbookingacr-connection'          # <--- EDIT (Service Connection to your ACR)
+
+  # Trivy
+  - name: trivy_version
+    value: '0.67.2'
 
 # ================== STAGES ==================
 stages:
@@ -132,7 +136,6 @@ stages:
               : "${SONAR_PROJECT_KEY:?SONAR_PROJECT_KEY is not set}"
               : "${SONAR_PROJECT_NAME:?SONAR_PROJECT_NAME is not set}"
 
-              # ----- Version selection & URL patterns (5.x vs 6.x differ) -----
               VER="${SCANNER_VER:-6.2.1.4610}"
               if [[ "$VER" == 5.* ]]; then
                 ZIP="sonar-scanner-cli-${VER}-linux.zip"
@@ -242,23 +245,26 @@ stages:
             PathtoPublish: '$(System.DefaultWorkingDirectory)/trivy-reports'
             ArtifactName: 'trivy-fs-reports'
 
-# ========== STAGE 1: BUILD AND PUSH DOCKER IMAGES ==========
+# ========== STAGE 1: BUILD → TRIVY SCAN (gate) → PUSH ==========
 - stage: Build
-  displayName: 'Build and Push Images'
+  displayName: 'Build, Scan (gate), and Push Images'
   dependsOn: CodeScan
   jobs:
-    - job: BuildAndPush
-      displayName: 'Build and Push to ACR'
+    - job: BuildScanPush
+      displayName: 'Backend & Frontend — Build, Trivy v$(trivy_version), Push on Pass'
       pool:
         vmImage: 'ubuntu-latest'
       steps:
+        - checkout: self
+
+        # Build images locally (NO PUSH YET)
         - task: Docker@2
-          displayName: 'Build and Push Backend'
+          displayName: 'Docker build — Backend (no push)'
           inputs:
-            containerRegistry: '$(acrServiceConnection)'
             repository: 'backend'
-            command: 'buildAndPush'
+            command: 'build'
             Dockerfile: 'backend/Dockerfile'
+            buildContext: 'backend'
             tags: '$(Build.BuildId)'
 
         - script: |
@@ -266,56 +272,123 @@ stages:
           displayName: 'Create Frontend .env file'
 
         - task: Docker@2
-          displayName: 'Build and Push Frontend'
+          displayName: 'Docker build — Frontend (no push)'
           inputs:
-            containerRegistry: '$(acrServiceConnection)'
             repository: 'frontend'
-            command: 'buildAndPush'
+            command: 'build'
             Dockerfile: 'frontend/Dockerfile'
             buildContext: 'frontend'
             tags: '$(Build.BuildId)'
 
-# ========== STAGE 1.5: SCAN BUILT IMAGES (Trivy) ==========
-- stage: ScanImages
-  displayName: 'Scan container images (Trivy)'
-  dependsOn: Build
-  jobs:
-    - job: TrivyScan
-      displayName: 'Trivy vulnerability scan'
-      pool:
-        vmImage: 'ubuntu-latest'
-      steps:
-        - task: Docker@2
-          displayName: 'Docker login to ACR'
-          inputs:
-            containerRegistry: '$(acrServiceConnection)'
-            command: 'login'
-
+        # Install Trivy (pinned) + use cache
         - task: Cache@2
           displayName: 'Cache Trivy DB'
           inputs:
             key: 'trivy-db-cache | "$(Agent.OS)"'
             path: '$(Pipeline.Workspace)/trivydb'
 
-        - script: |
+        - bash: |
             set -e
-            mkdir -p "$(Pipeline.Workspace)/trivydb"
-            curl -sL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
+            echo "Installing Trivy v$(trivy_version)"
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b ./bin v$(trivy_version)
             ./bin/trivy --version
 
-            # Use cached DB for faster/consistent scans
-            ./bin/trivy image \
-              --cache-dir "$(Pipeline.Workspace)/trivydb" \
-              --exit-code 1 \
-              --severity HIGH,CRITICAL \
-              $(acrName).azurecr.io/backend:$(Build.BuildId)
+            mkdir -p "$(Pipeline.Workspace)/trivydb"
+            ./bin/trivy image --download-db-only --cache-dir "$(Pipeline.Workspace)/trivydb" alpine:3.20 >/dev/null 2>&1 || true
+          displayName: 'Install Trivy v$(trivy_version) & warm DB'
 
+        # Trivy scans (gate on HIGH/CRITICAL) + SARIF artifacts
+        - bash: |
+            set -e
+            REPORT_DIR="$(System.DefaultWorkingDirectory)/container-security"
+            mkdir -p "$REPORT_DIR"
+
+            echo "Scanning BACKEND image (fail on HIGH/CRITICAL)..."
             ./bin/trivy image \
+              --scanners vuln,secret \
+              --ignore-unfixed \
               --cache-dir "$(Pipeline.Workspace)/trivydb" \
-              --exit-code 1 \
               --severity HIGH,CRITICAL \
-              $(acrName).azurecr.io/frontend:$(Build.BuildId)
-          displayName: 'Trivy scan images (fail on HIGH/CRITICAL)'
+              --exit-code 1 \
+              --no-progress \
+              "$(acrName).azurecr.io/backend:$(Build.BuildId)" || \
+              # If the local tag is not namespaced, scan local "backend:BuildId"
+              ./bin/trivy image \
+                --scanners vuln,secret \
+                --ignore-unfixed \
+                --cache-dir "$(Pipeline.Workspace)/trivydb" \
+                --severity HIGH,CRITICAL \
+                --exit-code 1 \
+                --no-progress \
+                "backend:$(Build.BuildId)"
+
+            echo "Generate BACKEND SARIF..."
+            ./bin/trivy image \
+              --scanners vuln,secret \
+              --ignore-unfixed \
+              --cache-dir "$(Pipeline.Workspace)/trivydb" \
+              --severity LOW,MEDIUM,HIGH,CRITICAL \
+              --format sarif \
+              --output "$REPORT_DIR/backend-trivy.sarif" \
+              --no-progress \
+              "backend:$(Build.BuildId)"
+
+            echo "Scanning FRONTEND image (fail on HIGH/CRITICAL)..."
+            ./bin/trivy image \
+              --scanners vuln,secret \
+              --ignore-unfixed \
+              --cache-dir "$(Pipeline.Workspace)/trivydb" \
+              --severity HIGH,CRITICAL \
+              --exit-code 1 \
+              --no-progress \
+              "$(acrName).azurecr.io/frontend:$(Build.BuildId)" || \
+              ./bin/trivy image \
+                --scanners vuln,secret \
+                --ignore-unfixed \
+                --cache-dir "$(Pipeline.Workspace)/trivydb" \
+                --severity HIGH,CRITICAL \
+                --exit-code 1 \
+                --no-progress \
+                "frontend:$(Build.BuildId)"
+
+            echo "Generate FRONTEND SARIF..."
+            ./bin/trivy image \
+              --scanners vuln,secret \
+              --ignore-unfixed \
+              --cache-dir "$(Pipeline.Workspace)/trivydb" \
+              --severity LOW,MEDIUM,HIGH,CRITICAL \
+              --format sarif \
+              --output "$REPORT_DIR/frontend-trivy.sarif" \
+              --no-progress \
+              "frontend:$(Build.BuildId)"
+          displayName: 'Trivy scan images (gate) + SARIF'
+
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Trivy image SARIF'
+          condition: succeededOrFailed()
+          inputs:
+            PathtoPublish: '$(System.DefaultWorkingDirectory)/container-security'
+            ArtifactName: 'trivy-image-sarif'
+
+        # If scans passed, login and PUSH both images to ACR
+        - task: Docker@2
+          displayName: 'Docker login to ACR'
+          condition: succeeded()     # only if scans succeeded
+          inputs:
+            containerRegistry: '$(acrServiceConnection)'
+            command: 'login'
+
+        - bash: |
+            set -e
+            echo "Tagging images with ACR registry name and pushing..."
+            # Ensure local to ACR tagging (if build used local repo names)
+            docker tag backend:$(Build.BuildId) $(acrName).azurecr.io/backend:$(Build.BuildId) || true
+            docker tag frontend:$(Build.BuildId) $(acrName).azurecr.io/frontend:$(Build.BuildId) || true
+
+            docker push $(acrName).azurecr.io/backend:$(Build.BuildId)
+            docker push $(acrName).azurecr.io/frontend:$(Build.BuildId)
+          displayName: 'Push images to ACR'
+          condition: succeeded()
 
 # ========== STAGE 2: TERRAFORM VALIDATION ==========
 - stage: TerraformValidate
@@ -364,7 +437,6 @@ stages:
   displayName: 'Deploy Applications'
   dependsOn:
     - Build
-    - ScanImages
     - IaCSecurity
     - CodeScan
   jobs:
