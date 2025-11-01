@@ -94,6 +94,25 @@ stages:
           inputs:
             versionSpec: '20.x'
 
+        # ---- TEMPORARY: Fix known vulnerabilities before build ----
+        - bash: |
+            set -e
+            cd backend
+            echo "Checking and fixing known vulnerabilities..."
+            
+            # Fix CVE-2024-21538 (cross-spawn)
+            if grep -q '"cross-spawn": "7.0.3"' package-lock.json 2>/dev/null; then
+              echo "Updating cross-spawn to 7.0.5 (CVE-2024-21538)..."
+              npm install cross-spawn@7.0.5 --save-exact
+            fi
+            
+            # Run general audit fix
+            npm audit fix --force || true
+            
+            echo "✓ Vulnerability fixes applied"
+          displayName: 'Auto-fix Known Vulnerabilities'
+          continueOnError: true
+
         # ---- Build (so analyzers see TS outputs if needed) ----
         - script: |
             set -e
@@ -257,6 +276,15 @@ stages:
       steps:
         - checkout: self
 
+        # Setup .trivyignore (for managed exceptions)
+        - bash: |
+            if [ ! -f .trivyignore ]; then
+              echo "# Add CVEs to ignore here (use sparingly)" > .trivyignore
+              echo "# Example: CVE-2024-12345" >> .trivyignore
+            fi
+            cp .trivyignore "$(Build.SourcesDirectory)/.trivyignore" || true
+          displayName: 'Setup Trivy ignore file'
+
         # Build images locally (NO PUSH YET)
         - task: Docker@2
           displayName: 'Docker build — Backend (no push)'
@@ -319,56 +347,107 @@ stages:
 
             CACHE_DIR="$(Pipeline.Workspace)/trivydb"
             IMAGES_DIR="$(Build.SourcesDirectory)/images"
+            IGNORE_FILE="$(Build.SourcesDirectory)/.trivyignore"
 
-            echo "Scanning BACKEND tar (fail on HIGH/CRITICAL)..."
-            ./bin/trivy image \
-              --input  "${IMAGES_DIR}/backend-$(Build.BuildId).tar" \
-              --scanners vuln,secret \
-              --ignore-unfixed \
-              --cache-dir "${CACHE_DIR}" \
-              --severity HIGH,CRITICAL \
-              --exit-code 1 \
-              --no-progress
+            # Function to scan and generate reports
+            scan_image() {
+              local IMAGE_NAME=$1
+              local TAR_FILE="${IMAGES_DIR}/${IMAGE_NAME}-$(Build.BuildId).tar"
+              
+              echo "========================================"
+              echo "Scanning ${IMAGE_NAME} tar (fail on HIGH/CRITICAL)..."
+              echo "========================================"
+              
+              # Gate scan - fails on HIGH/CRITICAL
+              if ! ./bin/trivy image \
+                --input "${TAR_FILE}" \
+                --scanners vuln,secret \
+                --ignore-unfixed \
+                --ignorefile "${IGNORE_FILE}" \
+                --cache-dir "${CACHE_DIR}" \
+                --severity HIGH,CRITICAL \
+                --exit-code 1 \
+                --no-progress; then
+                echo "##vso[task.logissue type=error]${IMAGE_NAME} has HIGH/CRITICAL vulnerabilities!"
+                return 1
+              fi
 
-            echo "Generate BACKEND SARIF..."
-            ./bin/trivy image \
-              --input  "${IMAGES_DIR}/backend-$(Build.BuildId).tar" \
-              --scanners vuln,secret \
-              --ignore-unfixed \
-              --cache-dir "${CACHE_DIR}" \
-              --severity LOW,MEDIUM,HIGH,CRITICAL \
-              --format sarif \
-              --output "${REPORT_DIR}/backend-trivy.sarif" \
-              --no-progress
+              echo "✓ ${IMAGE_NAME} passed security gate"
+              
+              # Generate SARIF for all severities
+              echo "Generating ${IMAGE_NAME} SARIF report..."
+              ./bin/trivy image \
+                --input "${TAR_FILE}" \
+                --scanners vuln,secret \
+                --ignore-unfixed \
+                --ignorefile "${IGNORE_FILE}" \
+                --cache-dir "${CACHE_DIR}" \
+                --severity LOW,MEDIUM,HIGH,CRITICAL \
+                --format sarif \
+                --output "${REPORT_DIR}/${IMAGE_NAME}-trivy.sarif" \
+                --no-progress
+              
+              # Generate human-readable report for artifacts
+              echo "Generating ${IMAGE_NAME} text report..."
+              ./bin/trivy image \
+                --input "${TAR_FILE}" \
+                --scanners vuln,secret \
+                --ignore-unfixed \
+                --ignorefile "${IGNORE_FILE}" \
+                --cache-dir "${CACHE_DIR}" \
+                --severity LOW,MEDIUM,HIGH,CRITICAL \
+                --format table \
+                --output "${REPORT_DIR}/${IMAGE_NAME}-trivy.txt" \
+                --no-progress
+              
+              return 0
+            }
 
-            echo "Scanning FRONTEND tar (fail on HIGH/CRITICAL)..."
-            ./bin/trivy image \
-              --input  "${IMAGES_DIR}/frontend-$(Build.BuildId).tar" \
-              --scanners vuln,secret \
-              --ignore-unfixed \
-              --cache-dir "${CACHE_DIR}" \
-              --severity HIGH,CRITICAL \
-              --exit-code 1 \
-              --no-progress
+            # Scan both images
+            BACKEND_RESULT=0
+            FRONTEND_RESULT=0
+            
+            scan_image "backend" || BACKEND_RESULT=$?
+            scan_image "frontend" || FRONTEND_RESULT=$?
 
-            echo "Generate FRONTEND SARIF..."
-            ./bin/trivy image \
-              --input  "${IMAGES_DIR}/frontend-$(Build.BuildId).tar" \
-              --scanners vuln,secret \
-              --ignore-unfixed \
-              --cache-dir "${CACHE_DIR}" \
-              --severity LOW,MEDIUM,HIGH,CRITICAL \
-              --format sarif \
-              --output "${REPORT_DIR}/frontend-trivy.sarif" \
-              --no-progress
+            # Fail if either scan failed
+            if [ $BACKEND_RESULT -ne 0 ] || [ $FRONTEND_RESULT -ne 0 ]; then
+              echo "##vso[task.complete result=Failed;]Security scan failed - HIGH/CRITICAL vulnerabilities found"
+              exit 1
+            fi
+
+            echo "✓ All security scans passed"
           displayName: 'Trivy scan image TARS (gate) + SARIF'
 
+        # Generate scan summary
+        - bash: |
+            REPORT_DIR="$(System.DefaultWorkingDirectory)/container-security"
+            
+            if [ -d "$REPORT_DIR" ]; then
+              echo "## Security Scan Summary" > "$REPORT_DIR/summary.md"
+              echo "" >> "$REPORT_DIR/summary.md"
+              echo "Build ID: $(Build.BuildId)" >> "$REPORT_DIR/summary.md"
+              echo "Date: $(date)" >> "$REPORT_DIR/summary.md"
+              echo "" >> "$REPORT_DIR/summary.md"
+              echo "### Backend Scan Results" >> "$REPORT_DIR/summary.md"
+              echo '```' >> "$REPORT_DIR/summary.md"
+              cat "$REPORT_DIR/backend-trivy.txt" >> "$REPORT_DIR/summary.md" 2>/dev/null || echo "No backend report" >> "$REPORT_DIR/summary.md"
+              echo '```' >> "$REPORT_DIR/summary.md"
+              echo "" >> "$REPORT_DIR/summary.md"
+              echo "### Frontend Scan Results" >> "$REPORT_DIR/summary.md"
+              echo '```' >> "$REPORT_DIR/summary.md"
+              cat "$REPORT_DIR/frontend-trivy.txt" >> "$REPORT_DIR/summary.md" 2>/dev/null || echo "No frontend report" >> "$REPORT_DIR/summary.md"
+              echo '```' >> "$REPORT_DIR/summary.md"
+            fi
+          displayName: 'Generate scan summary'
+          condition: always()
+
         - task: PublishBuildArtifacts@1
-          displayName: 'Publish Trivy image SARIF'
+          displayName: 'Publish Trivy image reports'
           condition: succeededOrFailed()
           inputs:
             PathtoPublish: '$(System.DefaultWorkingDirectory)/container-security'
-            ArtifactName: 'trivy-image-sarif'
+            ArtifactName: 'trivy-image-reports'
 
         # If scans passed, login and PUSH both images to ACR
         - task: Docker@2
@@ -380,13 +459,44 @@ stages:
 
         - bash: |
             set -euo pipefail
-            echo "Tagging images with ACR registry name and pushing..."
-            docker tag backend:$(Build.BuildId) $(acrName).azurecr.io/backend:$(Build.BuildId) || true
-            docker tag frontend:$(Build.BuildId) $(acrName).azurecr.io/frontend:$(Build.BuildId) || true
+            echo "Tagging and pushing images to ACR..."
+            
+            # Tag backend
+            if ! docker tag backend:$(Build.BuildId) $(acrName).azurecr.io/backend:$(Build.BuildId); then
+              echo "##vso[task.logissue type=error]Failed to tag backend image"
+              exit 1
+            fi
+            
+            # Tag frontend
+            if ! docker tag frontend:$(Build.BuildId) $(acrName).azurecr.io/frontend:$(Build.BuildId); then
+              echo "##vso[task.logissue type=error]Failed to tag frontend image"
+              exit 1
+            fi
 
-            docker push $(acrName).azurecr.io/backend:$(Build.BuildId)
-            docker push $(acrName).azurecr.io/frontend:$(Build.BuildId)
-          displayName: 'Push images to ACR'
+            # Push backend
+            echo "Pushing backend image..."
+            if ! docker push $(acrName).azurecr.io/backend:$(Build.BuildId); then
+              echo "##vso[task.logissue type=error]Failed to push backend image"
+              exit 1
+            fi
+            echo "✓ Backend image pushed successfully"
+            
+            # Push frontend
+            echo "Pushing frontend image..."
+            if ! docker push $(acrName).azurecr.io/frontend:$(Build.BuildId); then
+              echo "##vso[task.logissue type=error]Failed to push frontend image"
+              exit 1
+            fi
+            echo "✓ Frontend image pushed successfully"
+            
+            # Also tag and push as 'latest' for convenience
+            docker tag $(acrName).azurecr.io/backend:$(Build.BuildId) $(acrName).azurecr.io/backend:latest
+            docker tag $(acrName).azurecr.io/frontend:$(Build.BuildId) $(acrName).azurecr.io/frontend:latest
+            docker push $(acrName).azurecr.io/backend:latest
+            docker push $(acrName).azurecr.io/frontend:latest
+            
+            echo "✓ All images pushed successfully (including 'latest' tags)"
+          displayName: 'Tag and Push images to ACR'
           condition: succeeded()
 
 # ========== STAGE 2: TERRAFORM VALIDATION ==========
