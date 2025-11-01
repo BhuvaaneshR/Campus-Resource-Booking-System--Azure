@@ -264,8 +264,7 @@ stages:
 
         - task: PublishBuildArtifacts@1
           displayName: 'Publish Trivy FS reports'
-          # Publish only if the folder actually exists (but we also create it above)
-          condition: and(always(), exists('$(System.DefaultWorkingDirectory)/trivy-reports'))
+          condition: always()
           inputs:
             PathtoPublish: '$(System.DefaultWorkingDirectory)/trivy-reports'
             ArtifactName: 'trivy-fs-reports'
