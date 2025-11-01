@@ -136,6 +136,31 @@ stages:
             npm audit --audit-level=high || true
           displayName: 'Dependency audit (npm) — soft fail'
 
+        # ---- TESTS with COVERAGE (before Sonar) ----
+        - bash: |
+            set -e
+            echo "Running backend tests with coverage..."
+            cd backend
+            # If deps already installed above, this is fast. Ensure jest libs are present.
+            npm run test:cov || true
+          displayName: 'Backend tests (coverage)'
+
+        # (Optional) Frontend tests — only if you have them
+        - bash: |
+            set -e
+            if [ -f "frontend/package.json" ] && jq -er '.scripts["test:cov"]' frontend/package.json >/dev/null 2>&1; then
+              echo "Running frontend tests with coverage..."
+              cd frontend
+              npm run test:cov || true
+            else
+              echo "Skipping frontend coverage (no test:cov script)"
+            fi
+          displayName: 'Frontend tests (coverage)'
+          env:
+            # jq is available on ubuntu-latest image; if ever missing, we could parse with node.
+            # No extra env needed here.
+            CI: "true"
+
         # ---- SonarCloud via CLI ----
         - task: Bash@3
           displayName: 'Install & run SonarScanner (CLI)'
@@ -181,14 +206,31 @@ stages:
               echo "SonarScanner version:"
               sonar-scanner --version
 
+              # ---- Dynamically pass LCOV reports if they exist ----
+              LCOVS=()
+              [[ -f backend/coverage/lcov.info ]] && LCOVS+=("backend/coverage/lcov.info")
+              [[ -f frontend/coverage/lcov.info ]] && LCOVS+=("frontend/coverage/lcov.info")
+              LCOV_ARG=""
+              if [[ ${#LCOVS[@]} -gt 0 ]]; then
+                LCOV_JOINED="$(IFS=, ; echo "${LCOVS[*]}")"
+                LCOV_ARG="-Dsonar.javascript.lcov.reportPaths=${LCOV_JOINED} -Dsonar.typescript.lcov.reportPaths=${LCOV_JOINED}"
+                echo "Passing LCOV to Sonar: ${LCOV_JOINED}"
+              else
+                echo "No LCOV found; Sonar will report 0% coverage on new code."
+              fi
+
               sonar-scanner \
                 -Dsonar.host.url=https://sonarcloud.io \
                 -Dsonar.organization="${SONAR_ORG}" \
                 -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
                 -Dsonar.projectName="${SONAR_PROJECT_NAME}" \
-                -Dsonar.sources=. \
+                -Dsonar.sources=backend/src,frontend/src \
+                -Dsonar.tests=backend,frontend \
+                -Dsonar.test.inclusions=**/*.test.*,**/*.spec.* \
                 -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/.terraform/** \
-                -Dsonar.token="${SONAR_TOKEN}"
+                -Dsonar.coverage.exclusions=**/node_modules/**,**/dist/**,**/build/** \
+                -Dsonar.token="${SONAR_TOKEN}" \
+                ${LCOV_ARG}
 
         # ---- Enforce Sonar Quality Gate (poll for result) ----
         - task: Bash@3
