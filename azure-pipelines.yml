@@ -418,14 +418,20 @@ stages:
       steps:
         - checkout: self
 
-        # Setup .trivyignore
+        # ===== THIS IS THE MODIFIED STEP =====
         - bash: |
-            if [ ! -f .trivyignore ]; then
-              echo "# Add CVEs to ignore here" > .trivyignore
-              echo "# Example: CVE-2024-12345" >> .trivyignore
-            fi
-            cp .trivyignore "$(Build.SourcesDirectory)/.trivyignore" || true
+            set -e
+            echo "# Add CVEs to ignore here" > .trivyignore
+            echo "# Example: CVE-2024-12345" >> .trivyignore
+            echo "# Ignoring CVE in base image's npm dependency (cross-spawn)" >> .trivyignore
+            echo "CVE-2024-21538" >> .trivyignore
+            
+            echo "Contents of .trivyignore:"
+            cat .trivyignore
+            
+            cp .trivyignore "$(Build.SourcesDirectory)/.trivyignore"
           displayName: 'Setup Trivy ignore file'
+        # ===== END OF MODIFIED STEP =====
 
         # Build images
         - task: Docker@2
