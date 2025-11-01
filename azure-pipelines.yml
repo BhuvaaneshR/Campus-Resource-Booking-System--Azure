@@ -245,13 +245,13 @@ stages:
             PathtoPublish: '$(System.DefaultWorkingDirectory)/trivy-reports'
             ArtifactName: 'trivy-fs-reports'
 
-# ========== STAGE 1: BUILD → TRIVY SCAN (gate) → PUSH ==========
+# ========== STAGE 1: BUILD → SAVE .tar → TRIVY SCAN (gate) → PUSH ==========
 - stage: Build
-  displayName: 'Build, Scan (gate), and Push Images'
+  displayName: 'Build, Scan (tar gate), and Push Images'
   dependsOn: CodeScan
   jobs:
     - job: BuildScanPush
-      displayName: 'Backend & Frontend — Build, Trivy v$(trivy_version), Push on Pass'
+      displayName: 'Backend & Frontend — Build, Trivy (tar) v$(trivy_version), Push on Pass'
       pool:
         vmImage: 'ubuntu-latest'
       steps:
@@ -280,7 +280,20 @@ stages:
             buildContext: 'frontend'
             tags: '$(Build.BuildId)'
 
-        # Install Trivy (pinned) + use cache
+        # === Save images to tarballs (no registry auth needed for scanning) ===
+        - bash: |
+            set -euo pipefail
+            IMAGES_DIR="$(Build.SourcesDirectory)/images"
+            mkdir -p "$IMAGES_DIR"
+
+            echo "Saving backend:$(Build.BuildId) → ${IMAGES_DIR}/backend-$(Build.BuildId).tar"
+            docker save "backend:$(Build.BuildId)" -o "${IMAGES_DIR}/backend-$(Build.BuildId).tar"
+
+            echo "Saving frontend:$(Build.BuildId) → ${IMAGES_DIR}/frontend-$(Build.BuildId).tar"
+            docker save "frontend:$(Build.BuildId)" -o "${IMAGES_DIR}/frontend-$(Build.BuildId).tar"
+          displayName: 'Save backend & frontend images as .tar'
+
+        # Install Trivy (pinned) + warm DB (cached)
         - task: Cache@2
           displayName: 'Cache Trivy DB'
           inputs:
@@ -294,74 +307,61 @@ stages:
             ./bin/trivy --version
 
             mkdir -p "$(Pipeline.Workspace)/trivydb"
+            # Warm DB quietly
             ./bin/trivy image --download-db-only --cache-dir "$(Pipeline.Workspace)/trivydb" alpine:3.20 >/dev/null 2>&1 || true
           displayName: 'Install Trivy v$(trivy_version) & warm DB'
 
-        # Trivy scans (gate on HIGH/CRITICAL) + SARIF artifacts
+        # Trivy scans against tar files (gate on HIGH/CRITICAL) + SARIF artifacts
         - bash: |
-            set -e
+            set -euo pipefail
             REPORT_DIR="$(System.DefaultWorkingDirectory)/container-security"
             mkdir -p "$REPORT_DIR"
 
-            echo "Scanning BACKEND image (fail on HIGH/CRITICAL)..."
+            CACHE_DIR="$(Pipeline.Workspace)/trivydb"
+            IMAGES_DIR="$(Build.SourcesDirectory)/images"
+
+            echo "Scanning BACKEND tar (fail on HIGH/CRITICAL)..."
             ./bin/trivy image \
+              --input  "${IMAGES_DIR}/backend-$(Build.BuildId).tar" \
               --scanners vuln,secret \
               --ignore-unfixed \
-              --cache-dir "$(Pipeline.Workspace)/trivydb" \
+              --cache-dir "${CACHE_DIR}" \
               --severity HIGH,CRITICAL \
               --exit-code 1 \
-              --no-progress \
-              "$(acrName).azurecr.io/backend:$(Build.BuildId)" || \
-              # If the local tag is not namespaced, scan local "backend:BuildId"
-              ./bin/trivy image \
-                --scanners vuln,secret \
-                --ignore-unfixed \
-                --cache-dir "$(Pipeline.Workspace)/trivydb" \
-                --severity HIGH,CRITICAL \
-                --exit-code 1 \
-                --no-progress \
-                "backend:$(Build.BuildId)"
+              --no-progress
 
             echo "Generate BACKEND SARIF..."
             ./bin/trivy image \
+              --input  "${IMAGES_DIR}/backend-$(Build.BuildId).tar" \
               --scanners vuln,secret \
               --ignore-unfixed \
-              --cache-dir "$(Pipeline.Workspace)/trivydb" \
+              --cache-dir "${CACHE_DIR}" \
               --severity LOW,MEDIUM,HIGH,CRITICAL \
               --format sarif \
-              --output "$REPORT_DIR/backend-trivy.sarif" \
-              --no-progress \
-              "backend:$(Build.BuildId)"
+              --output "${REPORT_DIR}/backend-trivy.sarif" \
+              --no-progress
 
-            echo "Scanning FRONTEND image (fail on HIGH/CRITICAL)..."
+            echo "Scanning FRONTEND tar (fail on HIGH/CRITICAL)..."
             ./bin/trivy image \
+              --input  "${IMAGES_DIR}/frontend-$(Build.BuildId).tar" \
               --scanners vuln,secret \
               --ignore-unfixed \
-              --cache-dir "$(Pipeline.Workspace)/trivydb" \
+              --cache-dir "${CACHE_DIR}" \
               --severity HIGH,CRITICAL \
               --exit-code 1 \
-              --no-progress \
-              "$(acrName).azurecr.io/frontend:$(Build.BuildId)" || \
-              ./bin/trivy image \
-                --scanners vuln,secret \
-                --ignore-unfixed \
-                --cache-dir "$(Pipeline.Workspace)/trivydb" \
-                --severity HIGH,CRITICAL \
-                --exit-code 1 \
-                --no-progress \
-                "frontend:$(Build.BuildId)"
+              --no-progress
 
             echo "Generate FRONTEND SARIF..."
             ./bin/trivy image \
+              --input  "${IMAGES_DIR}/frontend-$(Build.BuildId).tar" \
               --scanners vuln,secret \
               --ignore-unfixed \
-              --cache-dir "$(Pipeline.Workspace)/trivydb" \
+              --cache-dir "${CACHE_DIR}" \
               --severity LOW,MEDIUM,HIGH,CRITICAL \
               --format sarif \
-              --output "$REPORT_DIR/frontend-trivy.sarif" \
-              --no-progress \
-              "frontend:$(Build.BuildId)"
-          displayName: 'Trivy scan images (gate) + SARIF'
+              --output "${REPORT_DIR}/frontend-trivy.sarif" \
+              --no-progress
+          displayName: 'Trivy scan image TARS (gate) + SARIF'
 
         - task: PublishBuildArtifacts@1
           displayName: 'Publish Trivy image SARIF'
@@ -379,9 +379,8 @@ stages:
             command: 'login'
 
         - bash: |
-            set -e
+            set -euo pipefail
             echo "Tagging images with ACR registry name and pushing..."
-            # Ensure local to ACR tagging (if build used local repo names)
             docker tag backend:$(Build.BuildId) $(acrName).azurecr.io/backend:$(Build.BuildId) || true
             docker tag frontend:$(Build.BuildId) $(acrName).azurecr.io/frontend:$(Build.BuildId) || true
 
