@@ -421,15 +421,14 @@ stages:
         # ===== THIS IS THE MODIFIED STEP =====
         - bash: |
             set -e
-            echo "# Add CVEs to ignore here" > .trivyignore
-            echo "# Example: CVE-2024-12345" >> .trivyignore
-            echo "# Ignoring CVE in base image's npm dependency (cross-spawn)" >> .trivyignore
-            echo "CVE-2024-21538" >> .trivyignore
+            IGNORE_FILE_PATH="$(Build.SourcesDirectory)/.trivyignore"
+            echo "# Add CVEs to ignore here" > "${IGNORE_FILE_PATH}"
+            echo "# Example: CVE-2024-12345" >> "${IGNORE_FILE_PATH}"
+            echo "# Ignoring CVE in base image's npm dependency (cross-spawn)" >> "${IGNORE_FILE_PATH}"
+            echo "CVE-2024-21538" >> "${IGNORE_FILE_PATH}"
             
-            echo "Contents of .trivyignore:"
-            cat .trivyignore
-            
-            cp .trivyignore "$(Build.SourcesDirectory)/.trivyignore"
+            echo "Contents of ${IGNORE_FILE_PATH}:"
+            cat "${IGNORE_FILE_PATH}"
           displayName: 'Setup Trivy ignore file'
         # ===== END OF MODIFIED STEP =====
 
